@@ -1,0 +1,18 @@
+{
+  "workspaceRoot": ".",
+  "storageRoot": ".orchestrator",
+  "artifactRoot": "artifacts",
+  "toolProvider": "codex",
+  "toolProviderConfirmed": true,
+  "models": {
+    "planner": "gpt-5.3-codex",
+    "executor": "gpt-5.3-codex",
+    "reasoningEffort": "medium"
+  },
+  "codex": {
+    "adapter": "cli"
+  },
+  "claude": {
+    "adapter": "cli"
+  }
+}

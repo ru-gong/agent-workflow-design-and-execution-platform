@@ -1,0 +1,210 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Agent Orchestration Plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "name", "summary", "strategy", "nodes", "edges", "maxConcurrency", "finalDeliverable"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 80
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 5,
+      "maxLength": 600
+    },
+    "strategy": {
+      "type": "string",
+      "maxLength": 1200
+    },
+    "nodes": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "title",
+          "agent",
+          "task",
+          "skills",
+          "dependsOn",
+          "acceptance",
+          "mode",
+          "requiresReview",
+          "model",
+          "reasoningEffort",
+          "sandbox",
+          "networkPolicy",
+          "outputRequirement",
+          "reviewPolicy",
+          "x",
+          "y"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{1,40}$"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 80
+          },
+          "agent": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 80
+          },
+          "task": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 1600
+          },
+          "skills": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          },
+          "dependsOn": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 60
+            }
+          },
+          "acceptance": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 8,
+            "items": {
+              "type": "string",
+              "minLength": 4,
+              "maxLength": 220
+            }
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["codex", "human-review", "synthesis", "auto-review"]
+          },
+          "requiresReview": {
+            "type": "boolean"
+          },
+          "model": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "reasoningEffort": {
+            "type": "string",
+            "enum": ["low", "medium", "high", "xhigh", "max"]
+          },
+          "sandbox": {
+            "type": "string",
+            "enum": ["read-only", "workspace-write"]
+          },
+          "networkPolicy": {
+            "type": "string",
+            "enum": ["confirm", "full-access"]
+          },
+          "outputRequirement": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "custom"],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": ["ppt", "html", "markdown", "spreadsheet", "image", "pdf", "docx", "other"]
+              },
+              "custom": {
+                "type": "string",
+                "maxLength": 600
+              }
+            }
+          },
+          "reviewPolicy": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["maxIterations", "targetNodeIds", "criteria", "continueOnLimit"],
+            "properties": {
+              "maxIterations": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10
+              },
+              "targetNodeIds": {
+                "type": "array",
+                "maxItems": 6,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 60
+                }
+              },
+              "criteria": {
+                "type": "string",
+                "maxLength": 1000
+              },
+              "continueOnLimit": {
+                "type": "boolean"
+              }
+            }
+          },
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "edges": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["from", "to", "label"],
+        "properties": {
+          "from": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 60
+          },
+          "to": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 60
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 80
+          }
+        }
+      }
+    },
+    "maxConcurrency": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4
+    },
+    "finalDeliverable": {
+      "type": "string",
+      "maxLength": 600
+    }
+  }
+}

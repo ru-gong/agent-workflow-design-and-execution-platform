@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DAG 工作流、任务编排工具与对话协作的区别</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f4f6f6;
+        --paper: #ffffff;
+        --ink: #202426;
+        --muted: #65706c;
+        --line: #d9e1de;
+        --teal: #0f766e;
+        --teal-soft: #e0f2ef;
+        --orange: #e4572e;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        line-height: 1.72;
+      }
+
+      main {
+        width: min(900px, calc(100% - 32px));
+        margin: 32px auto;
+        padding: 34px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--paper);
+        box-shadow: 0 18px 45px rgba(32, 36, 38, 0.08);
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 30px;
+        line-height: 1.2;
+        letter-spacing: 0;
+      }
+
+      h2 {
+        margin: 34px 0 12px;
+        font-size: 18px;
+        line-height: 1.35;
+      }
+
+      p {
+        margin: 12px 0;
+      }
+
+      ul {
+        margin: 10px 0 0;
+        padding-left: 1.25em;
+      }
+
+      li {
+        margin: 6px 0;
+      }
+
+      strong {
+        color: var(--teal);
+      }
+
+      .subtitle {
+        margin-top: 10px;
+        color: var(--muted);
+      }
+
+      .note {
+        margin: 22px 0;
+        padding: 14px 16px;
+        border-left: 4px solid var(--teal);
+        background: var(--teal-soft);
+        border-radius: 8px;
+      }
+
+      .compare {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+        margin-top: 14px;
+      }
+
+      .card {
+        min-width: 0;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 16px;
+        background: #fbfcfc;
+      }
+
+      .card h3 {
+        margin: 0 0 8px;
+        font-size: 15px;
+      }
+
+      .product-name {
+        display: inline-flex;
+        margin-top: 14px;
+        padding: 5px 9px;
+        border-radius: 999px;
+        background: #fff0e9;
+        color: var(--orange);
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      @media (max-width: 720px) {
+        main {
+          width: min(100% - 20px, 900px);
+          margin: 10px auto;
+          padding: 22px;
+        }
+
+        h1 {
+          font-size: 24px;
+        }
+
+        .compare {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>DAG 工作流、任务编排工具与对话协作的区别</h1>
+      <p class="subtitle">这份说明用于记录：为什么这个工具底层叫 DAG 工作流，以及它和直接对话协作分别适合什么场景。</p>
+
+      <h2>为什么叫 DAG 工作流</h2>
+      <p>我叫它 <strong>DAG 工作流</strong>，主要是从实现模型说的，不一定是给用户看的产品名。</p>
+      <p>DAG = Directed Acyclic Graph，有向无环图。放到这个工具里就是：</p>
+      <ul>
+        <li><strong>节点</strong>：一个子任务，比如“需求拆解”“实现页面”“运行测试”“人工确认”“汇总交付”。</li>
+        <li><strong>边</strong>：依赖关系，比如“测试”必须等“实现”完成。</li>
+        <li><strong>无环</strong>：不能出现 A 等 B、B 又等 A 的死循环。</li>
+        <li><strong>好处</strong>：可以自动判断谁先执行、谁能并行、哪里卡住、哪个节点失败、哪些结果能传给下游。</li>
+      </ul>
+
+      <p>所以我说 DAG，是因为它适合“编排系统”的底层调度。但从产品语言上，我反而建议不要叫 DAG，除非面向工程师。界面里可以叫：</p>
+      <ul>
+        <li>任务流</li>
+        <li>编排图</li>
+        <li>执行计划</li>
+        <li>Agent 工作流</li>
+        <li>交付流程</li>
+      </ul>
+      <p>“DAG”适合放在技术文档里，不适合放在主界面上吓人。</p>
+
+      <h2>什么时候用这个工具</h2>
+      <p>我建议看一个判断标准：<strong>这个需求是否值得被拆成一个可保存、可调整、可执行、可复盘的计划。</strong></p>
+      <p>适合用这个工具的场景：</p>
+      <ul>
+        <li>需求比较大，不是一两句话能改完。</li>
+        <li>需要多个阶段：调研、设计、实现、测试、文档、汇总。</li>
+        <li>需要多个子 agent 或 skill 分工。</li>
+        <li>希望先看 AI 的执行方案，再人工调整。</li>
+        <li>需要中途人工确认。</li>
+        <li>需要保存过程、产物、日志和最终交付物。</li>
+        <li>需要可复盘：以后知道当时为什么这么做、哪些节点产出了什么。</li>
+        <li>要对一个项目持续工作，而不是一次性聊天。</li>
+      </ul>
+
+      <p>比如这些就适合：</p>
+      <ul>
+        <li>“帮我做一个完整的小产品”。</li>
+        <li>“分析这个代码库并重构某个模块”。</li>
+        <li>“规划并执行一套内容生产流程”。</li>
+        <li>“生成一个研究报告，带资料、结构、校验和最终文档”。</li>
+        <li>“让不同 agent 分别做调研、实现、测试、审稿”。</li>
+      </ul>
+
+      <h2>什么时候直接对话</h2>
+      <p>在这里直接和我对话，更适合：</p>
+      <ul>
+        <li>想快速讨论思路。</li>
+        <li>需求还很模糊，需要一起澄清。</li>
+        <li>只是一个小修复、小问题、小解释。</li>
+        <li>想让我快速看代码、改一处、跑测试。</li>
+        <li>需要高密度来回判断，而不是启动一个流程。</li>
+        <li>还没确定这件事值不值得编排。</li>
+      </ul>
+
+      <div class="note">
+        <p><strong>简单说：</strong></p>
+        <p>对话适合“思考和即时协作”。</p>
+        <p>这个工具适合“把复杂工作变成可执行系统”。</p>
+      </div>
+
+      <div class="compare">
+        <section class="card">
+          <h3>直接对话</h3>
+          <p>我是一个连续协作的人，灵活、快、可以随时拐弯。适合探索、判断、小修、小范围实现和高密度来回。</p>
+        </section>
+        <section class="card">
+          <h3>编排工具</h3>
+          <p>AI 更像一组被编排的执行单元，有计划、有节点、有日志、有产物、有状态。适合复杂、多阶段、需要留痕的交付。</p>
+        </section>
+      </div>
+
+      <h2>建议</h2>
+      <ul>
+        <li><strong>小事、探索、策略、快速代码修复</strong>：直接在这里聊，让我做。</li>
+        <li><strong>大事、长期任务、多步骤交付、需要留痕</strong>：用编排工具。</li>
+        <li><strong>不确定该不该用工具</strong>：先在这里问我，我帮你判断成“直接做”还是“进入编排”。</li>
+      </ul>
+
+      <p class="product-name">产品命名建议：界面使用“任务编排图”或“执行计划”，DAG 留在 README 和架构说明里。</p>
+    </main>
+  </body>
+</html>

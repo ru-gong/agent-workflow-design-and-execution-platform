@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-label="Weather">
+  <rect width="96" height="96" rx="20" fill="#eaf1ff"/>
+  <circle cx="34" cy="34" r="15" fill="#f4ca64"/>
+  <path d="M32 60c-8.8 0-16-6.3-16-14.2 0-7.4 6.4-13.5 14.5-14.1C34 24.7 41.8 20 50.8 20 63 20 73 28.9 73 39.8v.9c5.5 2 9 6.6 9 11.9C82 59.4 75.8 65 68.2 65H32z" fill="#ffffff"/>
+  <path d="M32 60c-8.8 0-16-6.3-16-14.2 0-7.4 6.4-13.5 14.5-14.1C34 24.7 41.8 20 50.8 20 63 20 73 28.9 73 39.8v.9c5.5 2 9 6.6 9 11.9C82 59.4 75.8 65 68.2 65H32z" fill="none" stroke="#0f766e" stroke-width="4" stroke-linejoin="round"/>
+  <path d="M28 76h38" stroke="#2563eb" stroke-width="5" stroke-linecap="round"/>
+  <path d="M38 84h18" stroke="#e4572e" stroke-width="5" stroke-linecap="round"/>
+</svg>

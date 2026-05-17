@@ -1,0 +1,1180 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Agent Workflow Design and Execution Platform 项目分享</title>
+    <style>
+      /*
+        huashu-design notes
+        Assumptions: 这是一份面向项目分享/路演的静态 HTML 文档，不是生产级 Web App。
+        Reasoning: 视觉从项目自身 UI 提炼，沿用浅色工作台、墨绿主色、橙色强调、细线网格与低圆角。
+        Placeholders: 没有编造指标；所有流程、命令、模块来自当前 README 与 server/public/test 代码。
+      */
+      :root {
+        color-scheme: light;
+        --bg: #f4f6f6;
+        --paper: #ffffff;
+        --paper-soft: #fbfcfc;
+        --ink: #202426;
+        --muted: #65706c;
+        --faint: #8a9692;
+        --line: #d9e1de;
+        --line-strong: #b9c6c1;
+        --teal: #0f766e;
+        --teal-ink: #075e56;
+        --teal-soft: #e0f2ef;
+        --orange: #e4572e;
+        --orange-soft: #fff0e9;
+        --gold: #b7791f;
+        --gold-soft: #fff7db;
+        --blue: #2563eb;
+        --blue-soft: #eaf1ff;
+        --red: #b42318;
+        --red-soft: #fff0ee;
+        --shadow: 0 18px 45px rgba(32, 36, 38, 0.1);
+        --radius: 8px;
+        --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+        --sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        --serif: "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", Georgia, serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        background:
+          linear-gradient(var(--line) 1px, transparent 1px),
+          linear-gradient(90deg, var(--line) 1px, transparent 1px),
+          var(--bg);
+        background-size: 32px 32px;
+        color: var(--ink);
+        font-family: var(--sans);
+        font-size: 16px;
+        line-height: 1.72;
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      code,
+      pre {
+        font-family: var(--mono);
+      }
+
+      .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 18px;
+        min-height: 58px;
+        padding: 8px max(18px, calc((100vw - 1180px) / 2));
+        border-bottom: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.92);
+        backdrop-filter: blur(14px);
+      }
+
+      .brand {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .brand-mark {
+        display: grid;
+        width: 34px;
+        height: 34px;
+        flex: 0 0 auto;
+        place-items: center;
+        border: 1px solid var(--line-strong);
+        border-radius: 8px;
+        background: var(--paper);
+        box-shadow: 0 6px 16px rgba(32, 36, 38, 0.08);
+      }
+
+      .brand-mark svg {
+        width: 22px;
+        height: 22px;
+      }
+
+      .brand-title {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 14px;
+        font-weight: 800;
+      }
+
+      .brand-subtitle {
+        margin-top: 1px;
+        overflow: hidden;
+        color: var(--muted);
+        font-size: 11px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .nav {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+
+      .nav a {
+        min-height: 32px;
+        padding: 6px 9px;
+        border: 1px solid transparent;
+        border-radius: 6px;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 720;
+      }
+
+      .nav a:hover {
+        border-color: var(--line);
+        background: var(--paper-soft);
+        color: var(--ink);
+      }
+
+      .page {
+        width: min(1180px, calc(100% - 36px));
+        margin: 0 auto;
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 0.92fr) minmax(420px, 1.08fr);
+        align-items: center;
+        gap: 34px;
+        padding: 58px 0 42px;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        min-height: 28px;
+        padding: 3px 9px;
+        border: 1px solid #a9d8d2;
+        border-radius: 999px;
+        background: var(--teal-soft);
+        color: var(--teal-ink);
+        font-size: 12px;
+        font-weight: 760;
+      }
+
+      h1 {
+        max-width: 760px;
+        margin: 18px 0 0;
+        font-family: var(--serif);
+        font-size: clamp(44px, 7vw, 92px);
+        font-weight: 760;
+        letter-spacing: 0;
+        line-height: 0.98;
+        text-wrap: balance;
+      }
+
+      .lead {
+        max-width: 650px;
+        margin: 24px 0 0;
+        color: #3f4a47;
+        font-size: clamp(18px, 2vw, 22px);
+        line-height: 1.72;
+        text-wrap: pretty;
+      }
+
+      .hero-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 26px;
+      }
+
+      .button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 38px;
+        padding: 0 14px;
+        border-radius: 6px;
+        font-size: 13px;
+        font-weight: 800;
+      }
+
+      .button.primary {
+        background: var(--ink);
+        color: #fff;
+      }
+
+      .button.secondary {
+        border: 1px solid var(--line-strong);
+        background: var(--paper);
+        color: var(--ink);
+      }
+
+      .hero-meta {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+        margin-top: 28px;
+        max-width: 620px;
+      }
+
+      .metric {
+        min-width: 0;
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.78);
+      }
+
+      .metric strong {
+        display: block;
+        color: var(--ink);
+        font-size: 20px;
+        line-height: 1.1;
+      }
+
+      .metric span {
+        display: block;
+        margin-top: 6px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.35;
+      }
+
+      .screen-frame {
+        overflow: hidden;
+        border: 1px solid var(--line-strong);
+        border-radius: 8px;
+        background: var(--paper);
+        box-shadow: var(--shadow);
+      }
+
+      .window-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        min-height: 36px;
+        padding: 7px 10px;
+        border-bottom: 1px solid var(--line);
+        background: #fbfcfc;
+      }
+
+      .traffic {
+        display: flex;
+        gap: 6px;
+      }
+
+      .traffic span {
+        width: 9px;
+        height: 9px;
+        border-radius: 99px;
+        background: var(--line-strong);
+      }
+
+      .traffic span:nth-child(1) {
+        background: #e4572e;
+      }
+
+      .traffic span:nth-child(2) {
+        background: #f4b63f;
+      }
+
+      .traffic span:nth-child(3) {
+        background: #1f8a4c;
+      }
+
+      .window-url {
+        overflow: hidden;
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 11px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .screen-frame img {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+
+      .caption {
+        padding: 10px 12px;
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      section {
+        scroll-margin-top: 82px;
+        padding: 54px 0;
+        border-top: 1px solid var(--line);
+      }
+
+      .section-head {
+        display: grid;
+        grid-template-columns: minmax(0, 0.92fr) minmax(280px, 0.48fr);
+        gap: 28px;
+        align-items: end;
+        margin-bottom: 26px;
+      }
+
+      .section-kicker {
+        color: var(--teal);
+        font-family: var(--mono);
+        font-size: 12px;
+        font-weight: 760;
+        text-transform: uppercase;
+      }
+
+      h2 {
+        margin: 7px 0 0;
+        font-family: var(--serif);
+        font-size: clamp(30px, 4vw, 52px);
+        font-weight: 720;
+        line-height: 1.05;
+        text-wrap: balance;
+      }
+
+      .section-copy {
+        margin: 0;
+        color: var(--muted);
+        font-size: 15px;
+        text-wrap: pretty;
+      }
+
+      .definition {
+        display: grid;
+        grid-template-columns: minmax(0, 0.95fr) minmax(300px, 0.55fr);
+        gap: 20px;
+        align-items: stretch;
+      }
+
+      .statement {
+        padding: 28px;
+        border: 1px solid var(--line-strong);
+        border-radius: 8px;
+        background: var(--paper);
+        box-shadow: 0 12px 30px rgba(32, 36, 38, 0.07);
+      }
+
+      .statement p {
+        margin: 0;
+        font-family: var(--serif);
+        font-size: clamp(26px, 3vw, 42px);
+        line-height: 1.28;
+        text-wrap: balance;
+      }
+
+      .statement em {
+        color: var(--teal);
+        font-style: normal;
+      }
+
+      .note-panel {
+        padding: 22px;
+        border: 1px solid #ecd1a2;
+        border-radius: 8px;
+        background: var(--gold-soft);
+      }
+
+      .note-panel h3,
+      .plain-panel h3,
+      .module h3,
+      .scenario h3 {
+        margin: 0 0 10px;
+        font-size: 16px;
+        line-height: 1.32;
+      }
+
+      .note-panel p,
+      .plain-panel p,
+      .module p,
+      .scenario p {
+        margin: 0;
+        color: #4f5a56;
+        font-size: 14px;
+        line-height: 1.65;
+      }
+
+      .flow {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(130px, 1fr));
+        gap: 1px;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--line);
+      }
+
+      .step {
+        min-height: 190px;
+        padding: 16px;
+        background: rgba(255, 255, 255, 0.9);
+      }
+
+      .step b {
+        display: block;
+        color: var(--teal);
+        font-family: var(--mono);
+        font-size: 12px;
+      }
+
+      .step strong {
+        display: block;
+        margin-top: 18px;
+        font-size: 17px;
+        line-height: 1.25;
+      }
+
+      .step span {
+        display: block;
+        margin-top: 10px;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.55;
+      }
+
+      .command-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .command {
+        min-width: 0;
+        padding: 16px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--paper);
+      }
+
+      .command h3 {
+        margin: 0 0 10px;
+        font-size: 14px;
+      }
+
+      pre {
+        overflow-x: auto;
+        margin: 0;
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: #202426;
+        color: #f4f6f6;
+        font-size: 12px;
+        line-height: 1.55;
+      }
+
+      .command p {
+        margin: 10px 0 0;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.55;
+      }
+
+      .architecture {
+        display: grid;
+        grid-template-columns: minmax(0, 0.76fr) minmax(360px, 1.24fr);
+        gap: 20px;
+        align-items: start;
+      }
+
+      .stack {
+        display: grid;
+        gap: 10px;
+      }
+
+      .plain-panel {
+        padding: 18px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.9);
+      }
+
+      .module-list {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .module {
+        min-width: 0;
+        padding: 16px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--paper);
+      }
+
+      .module code {
+        display: inline-flex;
+        max-width: 100%;
+        margin-bottom: 10px;
+        padding: 3px 6px;
+        border-radius: 5px;
+        background: var(--teal-soft);
+        color: var(--teal-ink);
+        font-size: 12px;
+      }
+
+      .schema-box {
+        border: 1px solid var(--line-strong);
+        border-radius: 8px;
+        background: var(--paper);
+      }
+
+      .schema-row {
+        display: grid;
+        grid-template-columns: 160px minmax(0, 1fr);
+        gap: 16px;
+        padding: 13px 16px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .schema-row:last-child {
+        border-bottom: 0;
+      }
+
+      .schema-row b {
+        font-family: var(--mono);
+        font-size: 12px;
+      }
+
+      .schema-row span {
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .scenario-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .scenario {
+        min-width: 0;
+        padding: 18px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.9);
+      }
+
+      .scenario .tag {
+        display: inline-flex;
+        margin-bottom: 14px;
+        padding: 3px 7px;
+        border-radius: 999px;
+        background: var(--orange-soft);
+        color: var(--orange);
+        font-family: var(--mono);
+        font-size: 11px;
+        font-weight: 760;
+      }
+
+      .talk-track {
+        display: grid;
+        grid-template-columns: 220px minmax(0, 1fr);
+        gap: 18px;
+        align-items: start;
+      }
+
+      .time-rail {
+        position: sticky;
+        top: 82px;
+        display: grid;
+        gap: 8px;
+      }
+
+      .time-rail a {
+        display: grid;
+        grid-template-columns: 54px minmax(0, 1fr);
+        gap: 8px;
+        align-items: center;
+        min-height: 36px;
+        padding: 6px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--paper);
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .time-rail b {
+        color: var(--teal);
+        font-family: var(--mono);
+      }
+
+      .script {
+        display: grid;
+        gap: 12px;
+      }
+
+      .script-item {
+        padding: 20px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--paper);
+      }
+
+      .script-item h3 {
+        margin: 0;
+        font-size: 18px;
+      }
+
+      .script-item p {
+        margin: 10px 0 0;
+        color: #424d49;
+      }
+
+      .script-item ul {
+        margin: 12px 0 0;
+        padding-left: 1.2em;
+        color: #424d49;
+      }
+
+      .script-item li {
+        margin: 5px 0;
+      }
+
+      .limits {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .limit-panel {
+        padding: 20px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--paper);
+      }
+
+      .limit-panel.warn {
+        border-color: #f0cf7a;
+        background: var(--gold-soft);
+      }
+
+      .limit-panel.good {
+        border-color: #a7d9bd;
+        background: var(--teal-soft);
+      }
+
+      .limit-panel h3 {
+        margin: 0 0 12px;
+        font-size: 16px;
+      }
+
+      .limit-panel ul {
+        margin: 0;
+        padding-left: 1.15em;
+      }
+
+      .limit-panel li {
+        margin: 7px 0;
+        color: #4f5a56;
+        font-size: 14px;
+      }
+
+      .footer {
+        padding: 34px 0 52px;
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .footer code {
+        color: var(--teal-ink);
+      }
+
+      @media (max-width: 980px) {
+        .nav {
+          display: none;
+        }
+
+        .hero,
+        .definition,
+        .architecture,
+        .section-head,
+        .talk-track {
+          grid-template-columns: 1fr;
+        }
+
+        .hero {
+          padding-top: 38px;
+        }
+
+        .flow {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .command-grid,
+        .scenario-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .time-rail {
+          position: static;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      @media (max-width: 680px) {
+        body {
+          background-size: 24px 24px;
+        }
+
+        .topbar {
+          grid-template-columns: 1fr;
+          padding-inline: 14px;
+        }
+
+        .page {
+          width: min(100% - 24px, 1180px);
+        }
+
+        h1 {
+          font-size: 42px;
+        }
+
+        .hero-meta,
+        .module-list,
+        .limits,
+        .flow {
+          grid-template-columns: 1fr;
+        }
+
+        .schema-row {
+          grid-template-columns: 1fr;
+          gap: 4px;
+        }
+
+        .time-rail {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="#top" aria-label="回到顶部">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M12 3v18M4.5 7.5h15M4.5 16.5h15" stroke="#0f766e" stroke-width="2" stroke-linecap="round" />
+            <circle cx="12" cy="12" r="3.5" fill="#e4572e" />
+          </svg>
+        </span>
+        <span>
+          <span class="brand-title">Agent Workflow Design and Execution Platform</span>
+          <span class="brand-subtitle">项目分享文档 · huashu-design</span>
+        </span>
+      </a>
+      <nav class="nav" aria-label="页面导航">
+        <a href="#what">定位</a>
+        <a href="#usage">用法</a>
+        <a href="#idea">思路</a>
+        <a href="#architecture">架构</a>
+        <a href="#applications">应用</a>
+        <a href="#talk">讲法</a>
+      </nav>
+    </header>
+
+    <main id="top" class="page">
+      <section class="hero" aria-label="项目简介">
+        <div>
+          <span class="eyebrow">Local-first agent workflow</span>
+          <h1>把一次性对话，变成可编辑、可执行、可复盘的 Agent 工作流。</h1>
+          <p class="lead">
+            这个项目是一个本地可运行的 Agent 工作流设计与执行平台：用户输入目标，系统先生成 DAG 任务图；人可以在画布上改节点、依赖、模型和
+            skill；确认后后端按依赖调度 Codex 执行，并把日志、产物、会话记录沉淀下来。
+          </p>
+          <div class="hero-actions">
+            <a class="button primary" href="#usage">看怎么跑起来</a>
+            <a class="button secondary" href="#talk">看 5 分钟分享讲法</a>
+          </div>
+          <div class="hero-meta" aria-label="项目关键信息">
+            <div class="metric">
+              <strong>Node.js 20+</strong>
+              <span>Express 后端，无前端构建依赖</span>
+            </div>
+            <div class="metric">
+              <strong>DAG</strong>
+              <span>依赖调度、并发、人工确认</span>
+            </div>
+            <div class="metric">
+              <strong>Session</strong>
+              <span>计划、运行日志、产物可追踪</span>
+            </div>
+          </div>
+        </div>
+
+        <figure class="screen-frame">
+          <div class="window-bar">
+            <div class="traffic" aria-hidden="true"><span></span><span></span><span></span></div>
+            <div class="window-url">http://localhost:8787 · visual DAG canvas</div>
+          </div>
+          <img src="jietuxiaoguo.png" alt="Agent Workflow Design and Execution Platform 可视化画布截图" />
+          <figcaption class="caption">
+            项目当前界面：左侧输入需求与运行设置，中间是可编辑 DAG 画布，右侧编辑节点配置，底部查看执行日志。
+          </figcaption>
+        </figure>
+      </section>
+
+      <section id="what">
+        <div class="section-head">
+          <div>
+            <div class="section-kicker">01 · Positioning</div>
+            <h2>它不是「多开几个聊天框」，而是给 Agent 工作加上工程化骨架。</h2>
+          </div>
+          <p class="section-copy">
+            项目 README 里有一句很关键：Agent View 的核心不是聊天窗口变多，而是把多个后台 agent 的状态、输入需求和生命周期集中到一个可操作视图里。
+          </p>
+        </div>
+
+        <div class="definition">
+          <div class="statement">
+            <p>
+              一句话定位：<em>用可视化 DAG 管住复杂任务</em>，让 Codex 从「回答者」变成「可调度的执行节点」。
+            </p>
+          </div>
+          <aside class="note-panel">
+            <h3>分享时可以这样开场</h3>
+            <p>
+              对话适合轻量协作，但复杂任务需要计划、并行、检查点和复盘。这个工具做的事，就是把这些工程化能力包在一个本地网页工作台里。
+            </p>
+          </aside>
+        </div>
+      </section>
+
+      <section id="usage">
+        <div class="section-head">
+          <div>
+            <div class="section-kicker">02 · Usage</div>
+            <h2>怎么用：启动、生成编排、人工调整、确认执行。</h2>
+          </div>
+          <p class="section-copy">
+            项目没有前端打包流程，Node 20+ 即可运行。真实执行依赖本机 Codex CLI；如果只想演示界面和调度，可以开 mock 模式。
+          </p>
+        </div>
+
+        <div class="command-grid">
+          <article class="command">
+            <h3>启动服务</h3>
+            <pre><code>npm start</code></pre>
+            <p>打开 <code>http://localhost:8787</code>，进入可视化编排工作台。</p>
+          </article>
+          <article class="command">
+            <h3>演示模式</h3>
+            <pre><code>USE_MOCK_CODEX=1 npm start</code></pre>
+            <p>不消耗真实 Codex 调用，节点会输出模拟日志，适合产品演示和流程讲解。</p>
+          </article>
+          <article class="command">
+            <h3>运行测试</h3>
+            <pre><code>npm test</code></pre>
+            <p>覆盖 planner、runner、config/session、skills、weather 和 folder picker 等核心逻辑。</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="idea">
+        <div class="section-head">
+          <div>
+            <div class="section-kicker">03 · Core Flow</div>
+            <h2>核心思路：先把目标变成结构化计划，再让执行器按图推进。</h2>
+          </div>
+          <p class="section-copy">
+            这里最重要的设计选择，是把「复杂需求」拆成 schema 约束的节点和边。计划可以被人看懂、编辑、保存，也可以被机器调度。
+          </p>
+        </div>
+
+        <div class="flow" aria-label="核心流程">
+          <div class="step">
+            <b>01</b>
+            <strong>输入目标</strong>
+            <span>用户在左侧输入想完成的任务，并选择规划模型与推理强度。</span>
+          </div>
+          <div class="step">
+            <b>02</b>
+            <strong>生成计划</strong>
+            <span><code>codex exec</code> 按 JSON Schema 输出 DAG 编排，失败时 fallback 到默认草案。</span>
+          </div>
+          <div class="step">
+            <b>03</b>
+            <strong>人工编辑</strong>
+            <span>在画布中拖动节点，修改任务、依赖、skill、sandbox、模型和验收标准。</span>
+          </div>
+          <div class="step">
+            <b>04</b>
+            <strong>依赖调度</strong>
+            <span>Runner 找出依赖已完成的节点，在最大并发限制内启动 Codex 子进程。</span>
+          </div>
+          <div class="step">
+            <b>05</b>
+            <strong>过程可见</strong>
+            <span>SSE 推送节点状态、stdout/stderr 日志、等待确认和最终结果。</span>
+          </div>
+          <div class="step">
+            <b>06</b>
+            <strong>沉淀产物</strong>
+            <span>Session 保存 conversation、plan、run 输出，artifact 目录保存用户可交付文件。</span>
+          </div>
+        </div>
+      </section>
+
+      <section id="architecture">
+        <div class="section-head">
+          <div>
+            <div class="section-kicker">04 · Architecture</div>
+            <h2>架构不复杂，但边界清楚：前端管操作感，后端管计划与执行。</h2>
+          </div>
+          <p class="section-copy">
+            代码规模大约 5,400 行，其中前端交互和样式占较大比例；后端模块按配置、规划、运行、会话、skill 发现分层。
+          </p>
+        </div>
+
+        <div class="architecture">
+          <div class="stack">
+            <div class="plain-panel">
+              <h3>HTTP API</h3>
+              <p><code>server/index.js</code> 提供静态资源、配置读写、计划生成、运行创建、SSE 事件、人工继续、停止运行等接口。</p>
+            </div>
+            <div class="plain-panel">
+              <h3>Codex CLI Adapter</h3>
+              <p><code>server/codexRunner.js</code> 封装 <code>codex exec</code>，支持 sandbox、模型、推理强度、schema 输出、超时和取消。</p>
+            </div>
+            <div class="plain-panel">
+              <h3>Local-first Storage</h3>
+              <p>默认把系统记录放在 <code>.orchestrator/sessions</code>，把用户交付物放在 <code>artifacts/&lt;session-id&gt;</code>。</p>
+            </div>
+          </div>
+
+          <div class="module-list">
+            <article class="module">
+              <code>server/planner.js</code>
+              <h3>计划归一化</h3>
+              <p>限制节点数量、去重边、补充 synthesis 节点、套用推理强度偏好。</p>
+            </article>
+            <article class="module">
+              <code>server/runner.js</code>
+              <h3>DAG 执行器</h3>
+              <p>按依赖和最大并发调度节点，支持 human-review 暂停、继续、取消和事件广播。</p>
+            </article>
+            <article class="module">
+              <code>server/sessionStore.js</code>
+              <h3>会话记录</h3>
+              <p>创建 session，保存原始计划、当前计划、运行快照、conversation.jsonl 和 manifest。</p>
+            </article>
+            <article class="module">
+              <code>public/app.js</code>
+              <h3>可视化工作台</h3>
+              <p>负责状态管理、DAG 画布、节点编辑、撤回、缩放、运行面板和人工确认弹窗。</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="schema">
+        <div class="section-head">
+          <div>
+            <div class="section-kicker">05 · Plan Model</div>
+            <h2>计划模型是这个项目的「契约」：人、前端、后端、Codex 都读同一种结构。</h2>
+          </div>
+          <p class="section-copy">
+            <code>schemas/orchestration-plan.schema.json</code> 约束了计划必须包含 name、summary、strategy、nodes、edges、maxConcurrency 和 finalDeliverable。
+          </p>
+        </div>
+
+        <div class="schema-box" aria-label="计划字段说明">
+          <div class="schema-row">
+            <b>nodes</b>
+            <span>每个节点包含 id、title、agent、task、skills、dependsOn、acceptance、mode、sandbox、坐标等字段。</span>
+          </div>
+          <div class="schema-row">
+            <b>mode</b>
+            <span><code>codex</code> 表示可执行节点，<code>human-review</code> 表示人工检查点，<code>synthesis</code> 表示最终汇总。</span>
+          </div>
+          <div class="schema-row">
+            <b>edges</b>
+            <span>表达节点依赖关系。Runner 只会启动所有依赖都 completed 的 pending 节点。</span>
+          </div>
+          <div class="schema-row">
+            <b>maxConcurrency</b>
+            <span>最大并发限制在 1 到 4 之间，避免本机同时拉起过多 Codex 执行。</span>
+          </div>
+          <div class="schema-row">
+            <b>acceptance</b>
+            <span>每个节点都有验收标准，让执行结果不只是「做了」，而是能被后续检查。</span>
+          </div>
+        </div>
+      </section>
+
+      <section id="applications">
+        <div class="section-head">
+          <div>
+            <div class="section-kicker">06 · Applications</div>
+            <h2>适合所有「值得拆解、执行、验证、沉淀」的复杂任务。</h2>
+          </div>
+          <p class="section-copy">
+            一个简单判断：如果这个需求值得被保存成一张计划图，并且中途可能需要人审、并行、产物归档，它就适合这个工具。
+          </p>
+        </div>
+
+        <div class="scenario-grid">
+          <article class="scenario">
+            <span class="tag">Software</span>
+            <h3>软件开发交付</h3>
+            <p>让不同节点分别负责代码阅读、实现、测试、文档和最终汇总。适合功能开发、重构、缺陷修复和代码审查。</p>
+          </article>
+          <article class="scenario">
+            <span class="tag">Research</span>
+            <h3>行业研究报告</h3>
+            <p>把资料范围、分主题调研、机会矩阵、人工确认、最终报告拆成可并行节点，过程和出处更容易复盘。</p>
+          </article>
+          <article class="scenario">
+            <span class="tag">Content</span>
+            <h3>内容生产流水线</h3>
+            <p>选题、资料、草稿、审稿、配图、发布稿可以拆开执行，并在关键节点保留人工判断。</p>
+          </article>
+          <article class="scenario">
+            <span class="tag">Ops</span>
+            <h3>本地自动化工作台</h3>
+            <p>把重复的工程任务流程化，例如生成文档、整理产物、运行检查、输出报告。</p>
+          </article>
+          <article class="scenario">
+            <span class="tag">Education</span>
+            <h3>Agent 教学演示</h3>
+            <p>它把「agent 如何拆任务、如何并行、如何等待人确认」可视化出来，非常适合作为教学案例。</p>
+          </article>
+          <article class="scenario">
+            <span class="tag">Prototype</span>
+            <h3>多 Agent 产品原型</h3>
+            <p>这不是一个完整商业产品，但已经验证了 Agent View、human-in-the-loop、session artifact 的核心交互。</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="limits">
+        <div class="section-head">
+          <div>
+            <div class="section-kicker">07 · Boundaries</div>
+            <h2>它的价值边界也很清楚：复杂任务更赚，简单对话不必上 DAG。</h2>
+          </div>
+          <p class="section-copy">
+            好工具不是替代所有协作方式，而是把合适的任务变得更可控。这个项目尤其适合阶段多、依赖多、需要复盘的任务。
+          </p>
+        </div>
+
+        <div class="limits">
+          <div class="limit-panel good">
+            <h3>适合</h3>
+            <ul>
+              <li>任务需要调研、实现、测试、文档等多个阶段。</li>
+              <li>用户想先看计划，再人工调整执行路径。</li>
+              <li>有多个 skill 或 agent 角色可以协同。</li>
+              <li>需要保存过程日志、运行结果和最终产物。</li>
+            </ul>
+          </div>
+          <div class="limit-panel warn">
+            <h3>不必使用</h3>
+            <ul>
+              <li>一句话能回答或一次小改能完成的需求。</li>
+              <li>需求高度不确定，尚未值得固化成执行图。</li>
+              <li>安全边界不清楚，却要直接给 workspace-write 权限。</li>
+              <li>需要长时间云端托管、团队权限和审计的生产场景。</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section id="talk">
+        <div class="section-head">
+          <div>
+            <div class="section-kicker">08 · Talk Track</div>
+            <h2>5 分钟分享讲法：从问题、方案、机制、场景到下一步。</h2>
+          </div>
+          <p class="section-copy">
+            下面这段可以直接当演讲稿使用。它刻意不从代码细节开始，而是先讲为什么需要这个工具。
+          </p>
+        </div>
+
+        <div class="talk-track">
+          <nav class="time-rail" aria-label="演讲时间轴">
+            <a href="#s1"><b>0:00</b><span>问题</span></a>
+            <a href="#s2"><b>0:45</b><span>方案</span></a>
+            <a href="#s3"><b>1:45</b><span>用法</span></a>
+            <a href="#s4"><b>2:45</b><span>机制</span></a>
+            <a href="#s5"><b>4:00</b><span>应用</span></a>
+            <a href="#s6"><b>4:40</b><span>收束</span></a>
+          </nav>
+
+          <div class="script">
+            <article id="s1" class="script-item">
+              <h3>0:00 · 为什么要做它</h3>
+              <p>
+                过去我们和 AI 协作，主要靠对话。对话很自然，但任务一复杂，就会遇到三个问题：拆解不透明、执行状态不可见、过程很难复盘。
+                这个项目想解决的就是这个问题：把复杂任务从「一串聊天」变成「一张可操作的任务图」。
+              </p>
+            </article>
+            <article id="s2" class="script-item">
+              <h3>0:45 · 它是什么</h3>
+              <p>
+                Agent Workflow Design and Execution Platform，中文名 Agent 工作流设计与执行平台，是一个本地可运行的可视化 Agent 编排系统。用户输入需求后，后端调用 Codex 或 Claude Code 生成 DAG 计划；
+                用户在页面里编辑节点和依赖；确认后由 Runner 按依赖执行，遇到人工确认节点就暂停等待。
+              </p>
+            </article>
+            <article id="s3" class="script-item">
+              <h3>1:45 · 怎么用</h3>
+              <ul>
+                <li>第一步，<code>npm start</code> 启动服务，打开 <code>localhost:8787</code>。</li>
+                <li>第二步，输入目标，比如「为当前项目做一个天气查询网页」。</li>
+                <li>第三步，检查并调整生成的任务流：节点、依赖、skill、模型和推理强度都可以改。</li>
+                <li>第四步，确认执行。底部会持续显示日志，人工确认节点会弹出确认窗口。</li>
+              </ul>
+            </article>
+            <article id="s4" class="script-item">
+              <h3>2:45 · 核心机制</h3>
+              <p>
+                机制上分四层：planner 负责把目标变成结构化 JSON；前端负责把 JSON 变成可编辑画布；runner 负责按 DAG 依赖调度；
+                session store 负责把计划、运行、日志和产物保存下来。它的关键不是某个模型，而是把 Agent 执行过程变成可观察、可干预、可复盘的系统。
+              </p>
+            </article>
+            <article id="s5" class="script-item">
+              <h3>4:00 · 能用在哪</h3>
+              <p>
+                它适合需要拆解和复盘的任务：软件开发、研究报告、内容生产、多 Agent 教学、本地自动化。反过来，如果只是问一个简单问题，直接对话更快。
+                这个工具的优势在复杂任务：你能看到谁在做什么、谁依赖谁、哪里卡住、最终产物在哪里。
+              </p>
+            </article>
+            <article id="s6" class="script-item">
+              <h3>4:40 · 下一步</h3>
+              <p>
+                下一步可以继续补三类能力：更强的节点模板和权限策略，更完整的运行历史和回放，更好的团队协作与外部系统集成。
+                但当前版本已经证明了一个方向：Agent 产品不一定只是聊天框，也可以是一个可执行的工作流系统。
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <footer class="footer">
+        <p>
+          本页基于当前项目文件生成：<code>README.md</code>、<code>server/</code>、<code>public/</code>、<code>schemas/</code>、<code>test/</code>。
+          设计风格沿用项目自身的浅色编排工作台视觉。
+        </p>
+      </footer>
+    </main>
+  </body>
+</html>

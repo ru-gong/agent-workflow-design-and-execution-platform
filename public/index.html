@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Agent Workflow Design and Execution Platform</title>
+    <link rel="stylesheet" href="/style.css?v=20260517-product-name" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <img src="/orchestrator-mark.svg" alt="" class="brand-mark" />
+          <div>
+            <div class="brand-title">Agent Workflow Design and Execution Platform</div>
+            <div class="brand-subtitle">Agent 工作流设计与执行平台</div>
+          </div>
+        </div>
+        <div class="topbar-status">
+          <span id="toolStatus" class="pill muted">检测编程工具...</span>
+          <span id="runStatus" class="pill muted">未执行</span>
+          <button id="stopRunBtn" class="icon-button danger hidden" type="button" title="停止执行" aria-label="停止执行"></button>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <aside class="left-panel">
+          <section class="panel-section">
+            <div class="section-title">需求</div>
+            <textarea id="goalInput" class="goal-input" placeholder="输入你希望完成的需求，例如：为当前项目设计并实现一个用户权限模块，包含测试和文档。"></textarea>
+            <div class="field-row">
+              <label for="toolProviderInput">工具</label>
+              <select id="toolProviderInput" class="compact-input">
+                <option value="codex" selected>Codex</option>
+                <option value="claude">Claude Code</option>
+              </select>
+            </div>
+            <div class="field-row">
+              <label for="modelInput">模型</label>
+              <select id="modelInput" class="compact-input">
+                <option value="gpt-5.3-codex" selected>gpt-5.3-codex</option>
+                <option value="gpt-5.5">gpt-5.5</option>
+                <option value="gpt-5.4">gpt-5.4</option>
+                <option value="gpt-5.4-mini">gpt-5.4-mini</option>
+                <option value="gpt-5.3-codex-spark">gpt-5.3-codex-spark</option>
+                <option value="gpt-5.2">gpt-5.2</option>
+              </select>
+            </div>
+            <div class="field-row">
+              <label for="effortInput">推理</label>
+              <select id="effortInput" class="compact-input">
+                <option value="low">low</option>
+                <option value="medium" selected>medium</option>
+                <option value="high">high</option>
+                <option value="xhigh">xhigh</option>
+              </select>
+            </div>
+            <div class="field-row">
+              <label for="networkPolicyInput">联网</label>
+              <select id="networkPolicyInput" class="compact-input">
+                <option value="confirm" selected>需要时确认</option>
+                <option value="full-access">完全联网</option>
+              </select>
+            </div>
+            <div class="button-row">
+              <button id="generateBtn" class="primary-button" type="button"></button>
+              <button id="sampleBtn" class="ghost-button" type="button"></button>
+            </div>
+            <div id="planNotice" class="notice"></div>
+          </section>
+
+          <section class="panel-section settings-section">
+            <details id="settingsDetails">
+              <summary>
+                <span class="section-title">运行设置</span>
+                <span id="configStatus" class="settings-status">未加载</span>
+              </summary>
+              <div class="settings-grid">
+                <label>
+                  <span>编程工具</span>
+                  <select id="settingsToolProviderInput" class="compact-input">
+                    <option value="codex">Codex</option>
+                    <option value="claude">Claude Code</option>
+                  </select>
+                </label>
+                <label>
+                  <span>项目文件夹</span>
+                  <div class="path-picker-row">
+                    <input id="workspaceRootInput" class="compact-input" />
+                    <button id="pickWorkspaceRootBtn" class="mini-button" type="button">选择</button>
+                  </div>
+                </label>
+                <label>
+                  <span>记录目录</span>
+                  <div class="path-picker-row">
+                    <input id="storageRootInput" class="compact-input" />
+                    <button id="pickStorageRootBtn" class="mini-button" type="button">选择</button>
+                  </div>
+                </label>
+                <label>
+                  <span>产物目录</span>
+                  <div class="path-picker-row">
+                    <input id="artifactRootInput" class="compact-input" />
+                    <button id="pickArtifactRootBtn" class="mini-button" type="button">选择</button>
+                  </div>
+                </label>
+                <label>
+                  <span>规划模型</span>
+                  <select id="plannerModelInput" class="compact-input">
+                    <option value="gpt-5.3-codex">gpt-5.3-codex</option>
+                    <option value="gpt-5.5">gpt-5.5</option>
+                    <option value="gpt-5.4">gpt-5.4</option>
+                    <option value="gpt-5.4-mini">gpt-5.4-mini</option>
+                    <option value="gpt-5.3-codex-spark">gpt-5.3-codex-spark</option>
+                    <option value="gpt-5.2">gpt-5.2</option>
+                  </select>
+                </label>
+                <label>
+                  <span>执行模型</span>
+                  <select id="executorModelInput" class="compact-input">
+                    <option value="gpt-5.3-codex">gpt-5.3-codex</option>
+                    <option value="gpt-5.5">gpt-5.5</option>
+                    <option value="gpt-5.4">gpt-5.4</option>
+                    <option value="gpt-5.4-mini">gpt-5.4-mini</option>
+                    <option value="gpt-5.3-codex-spark">gpt-5.3-codex-spark</option>
+                    <option value="gpt-5.2">gpt-5.2</option>
+                  </select>
+                </label>
+                <label>
+                  <span>默认推理</span>
+                  <select id="defaultEffortInput" class="compact-input">
+                    <option value="low">low</option>
+                    <option value="medium">medium</option>
+                    <option value="high">high</option>
+                    <option value="xhigh">xhigh</option>
+                  </select>
+                </label>
+              </div>
+              <div id="configPaths" class="settings-paths"></div>
+              <button id="saveConfigBtn" class="mini-button" type="button">保存设置</button>
+            </details>
+          </section>
+
+          <section class="panel-section grow">
+            <div class="section-title with-action">
+              <span>Skills</span>
+              <button id="refreshSkillsBtn" class="mini-button" type="button" title="刷新 skills" aria-label="刷新 skills"></button>
+            </div>
+            <div id="skillsList" class="skills-list"></div>
+          </section>
+        </aside>
+
+        <section class="center-panel">
+          <div class="canvas-toolbar">
+            <div>
+              <div id="planName" class="plan-name">等待生成编排</div>
+              <div id="planSummary" class="plan-summary">输入需求后，让编程工具生成可编辑的 Agent 工作流。</div>
+              <div id="sessionMeta" class="session-meta">尚未创建会话。</div>
+            </div>
+            <div class="toolbar-actions">
+              <div class="zoom-controls" aria-label="画布缩放">
+                <button id="zoomOutBtn" class="tool-button" type="button" title="缩小画布" aria-label="缩小画布"></button>
+                <span id="zoomLabel" class="zoom-label">100%</span>
+                <button id="zoomInBtn" class="tool-button" type="button" title="放大画布" aria-label="放大画布"></button>
+                <button id="fitCanvasBtn" class="tool-button fit-button" type="button" title="总览画布" aria-label="总览画布"></button>
+                <button id="resetZoomBtn" class="text-tool-button" type="button" title="重置缩放">1:1</button>
+              </div>
+              <button id="undoBtn" class="tool-button" type="button" title="撤回上一步" aria-label="撤回上一步"></button>
+              <button id="addNodeBtn" class="tool-button" type="button" title="新增/插入节点" aria-label="新增/插入节点"></button>
+              <button id="layoutBtn" class="tool-button" type="button" title="自动布局" aria-label="自动布局"></button>
+              <button id="exportBtn" class="tool-button" type="button" title="导出 JSON" aria-label="导出 JSON"></button>
+              <button id="runBtn" class="run-button" type="button"></button>
+            </div>
+          </div>
+
+          <div id="canvasScroller" class="canvas-scroller">
+            <div id="flowCanvas" class="flow-canvas">
+              <div id="flowViewport" class="flow-viewport">
+                <svg id="edgeLayer" class="edge-layer" width="1800" height="960" aria-hidden="true"></svg>
+                <div id="nodeLayer" class="node-layer"></div>
+                <div id="selectionRect" class="selection-rect hidden"></div>
+                <div id="emptyState" class="empty-state">
+                  <img src="/orchestrator-mark.svg" alt="" />
+                  <div>尚未生成工作流</div>
+                  <p>左侧输入需求，生成后可拖动节点、改任务、换 agent、调依赖，再确认执行。</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="run-console">
+            <div class="console-header">
+              <div>
+                <div class="section-title">执行</div>
+                <div id="runMeta" class="console-meta">等待确认。</div>
+              </div>
+              <button id="clearLogsBtn" class="mini-button" type="button"></button>
+            </div>
+            <div id="runTimeline" class="run-timeline"></div>
+            <pre id="logOutput" class="log-output"></pre>
+          </div>
+        </section>
+
+        <aside class="right-panel">
+          <div class="inspector-header">
+            <div>
+              <div class="section-title">节点配置</div>
+              <div id="selectedNodeHint" class="inspector-hint">选择一个节点开始编辑。</div>
+            </div>
+            <button id="deleteNodeBtn" class="icon-button danger" type="button" title="删除节点" aria-label="删除节点"></button>
+          </div>
+
+          <div id="inspector" class="inspector empty">
+            <div class="empty-copy">节点任务、skill、依赖、推理强度和验收标准都可以在这里直接改。</div>
+          </div>
+        </aside>
+      </main>
+    </div>
+
+    <div id="toolChoiceModal" class="review-backdrop hidden">
+      <div class="tool-dialog" role="dialog" aria-modal="true" aria-labelledby="toolChoiceTitle">
+        <div class="tool-dialog-header">
+          <div>
+            <div id="toolChoiceTitle" class="tool-dialog-title">选择本次使用的编程工具</div>
+            <div class="tool-dialog-subtitle">启动时已扫描当前系统可用工具。选择后会用于生成工作流和执行节点，可在运行设置中切换。</div>
+          </div>
+        </div>
+        <div id="toolChoiceCards" class="tool-choice-cards"></div>
+      </div>
+    </div>
+
+    <div id="reviewModal" class="review-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="reviewModalTitle">
+      <section class="review-dialog">
+        <header class="review-dialog-header">
+          <div>
+            <div id="reviewModalTitle" class="section-title">人工确认</div>
+            <div id="reviewNodeMeta" class="review-node-meta">等待确认节点</div>
+          </div>
+          <button id="closeReviewBtn" class="icon-button" type="button" title="稍后确认" aria-label="稍后确认"></button>
+        </header>
+        <div id="reviewTask" class="review-task"></div>
+        <section class="review-section">
+          <div class="review-section-title">上游节点产物</div>
+          <div id="reviewUpstreamList" class="review-upstream-list"></div>
+        </section>
+        <section class="review-section">
+          <div class="review-section-title">文件产物位置</div>
+          <div id="reviewArtifacts" class="review-artifacts"></div>
+        </section>
+        <label class="review-field">
+          <span>确认意见</span>
+          <textarea id="reviewNoteInput" placeholder="写下通过意见、风险提示，或让后续节点关注的点。留空则按“人工确认通过”继续。"></textarea>
+        </label>
+        <div class="review-actions">
+          <button id="cancelReviewBtn" class="ghost-button" type="button">稍后</button>
+          <button id="submitReviewBtn" class="primary-button" type="button">确认并继续</button>
+        </div>
+      </section>
+    </div>
+
+    <template id="skillTemplate">
+      <button class="skill-chip" type="button"></button>
+    </template>
+
+    <script type="module" src="/app.js?v=20260517-auto-review"></script>
+  </body>
+</html>

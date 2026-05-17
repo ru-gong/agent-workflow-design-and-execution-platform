@@ -1,0 +1,169 @@
+import { promises as fs } from "node:fs";
+import path from "node:path";
+import { clampText, ensureDir, safeId } from "./utils.js";
+import { getRuntimeConfig, publicRuntimeConfig } from "./config.js";
+
+const SESSION_ID_PATTERN = /^[a-z0-9-]+$/i;
+
+export async function createSession({ goal, plan, source = "manual", warning = "", raw = "", runtime } = {}) {
+  const context = await buildSessionContext(safeId("session"), runtime);
+  const now = new Date().toISOString();
+  const metadata = {
+    id: context.id,
+    goal: clampText(goal, 4000),
+    source,
+    warning: clampText(warning, 1000),
+    createdAt: now,
+    updatedAt: now,
+    paths: context.paths,
+    config: publicRuntimeConfig(context.runtime)
+  };
+  await ensureDir(context.paths.sessionDir);
+  await ensureDir(context.paths.runsDir);
+  await ensureDir(context.paths.artifactDir);
+  await ensureManifest(context.paths.manifestPath, context.id);
+  await fs.writeFile(context.paths.metadataPath, `${JSON.stringify(metadata, null, 2)}\n`);
+  if (plan) {
+    await fs.writeFile(context.paths.planPath, `${JSON.stringify(plan, null, 2)}\n`);
+    await fs.writeFile(context.paths.currentPlanPath, `${JSON.stringify(plan, null, 2)}\n`);
+  }
+  await appendSessionEvent(context.id, { type: "user:goal", goal: metadata.goal }, context.runtime);
+  await appendSessionEvent(context.id, {
+    type: "plan:created",
+    source,
+    warning,
+    raw: clampText(raw, 6000),
+    nodeCount: Array.isArray(plan?.nodes) ? plan.nodes.length : 0
+  }, context.runtime);
+  return publicSession(context, metadata);
+}
+
+export async function getSessionContext(sessionId, runtime) {
+  return buildSessionContext(validateSessionId(sessionId), runtime);
+}
+
+export async function getSession(sessionId, runtime) {
+  const context = await getSessionContext(sessionId, runtime);
+  let metadata = {};
+  try {
+    metadata = JSON.parse(await fs.readFile(context.paths.metadataPath, "utf8"));
+  } catch {
+    metadata = { id: context.id, paths: context.paths, config: publicRuntimeConfig(context.runtime) };
+  }
+  return publicSession(context, metadata);
+}
+
+export async function saveCurrentPlan(sessionId, plan, { reason = "plan:edited", runtime } = {}) {
+  const context = await getSessionContext(sessionId, runtime);
+  await ensureDir(context.paths.sessionDir);
+  await fs.writeFile(context.paths.currentPlanPath, `${JSON.stringify(plan, null, 2)}\n`);
+  await touchMetadata(context);
+  await appendSessionEvent(context.id, {
+    type: reason,
+    nodeCount: Array.isArray(plan?.nodes) ? plan.nodes.length : 0
+  }, context.runtime);
+  return getSession(context.id, context.runtime);
+}
+
+export async function appendSessionEvent(sessionId, event, runtime) {
+  const context = await getSessionContext(sessionId, runtime);
+  await ensureDir(context.paths.sessionDir);
+  const line = JSON.stringify({
+    at: new Date().toISOString(),
+    ...event
+  });
+  await fs.appendFile(context.paths.conversationPath, `${line}\n`);
+}
+
+export async function ensureSessionManifest(sessionId, runtime) {
+  const context = await getSessionContext(sessionId, runtime);
+  await ensureDir(context.paths.artifactDir);
+  await ensureManifest(context.paths.manifestPath, context.id);
+  return context;
+}
+
+export async function getSessionManifest(sessionId, runtime) {
+  const context = await ensureSessionManifest(sessionId, runtime);
+  let manifest;
+  try {
+    manifest = JSON.parse(await fs.readFile(context.paths.manifestPath, "utf8"));
+  } catch {
+    manifest = {
+      sessionId: context.id,
+      updatedAt: new Date().toISOString(),
+      artifacts: []
+    };
+  }
+  if (!Array.isArray(manifest.artifacts)) manifest.artifacts = [];
+  return {
+    manifest,
+    paths: context.paths
+  };
+}
+
+async function buildSessionContext(sessionId, runtime) {
+  const resolvedRuntime = runtime || await getRuntimeConfig();
+  const id = validateSessionId(sessionId);
+  const sessionDir = path.join(resolvedRuntime.paths.sessionsRootPath, id);
+  const artifactDir = path.join(resolvedRuntime.paths.artifactRootPath, id);
+  return {
+    id,
+    runtime: resolvedRuntime,
+    paths: {
+      workspaceRoot: resolvedRuntime.paths.workspaceRootPath,
+      sessionDir,
+      runsDir: path.join(sessionDir, "runs"),
+      artifactDir,
+      manifestPath: path.join(artifactDir, "manifest.json"),
+      metadataPath: path.join(sessionDir, "metadata.json"),
+      conversationPath: path.join(sessionDir, "conversation.jsonl"),
+      planPath: path.join(sessionDir, "plan.json"),
+      currentPlanPath: path.join(sessionDir, "plan.current.json")
+    }
+  };
+}
+
+async function ensureManifest(manifestPath, sessionId) {
+  try {
+    await fs.access(manifestPath);
+  } catch {
+    const manifest = {
+      sessionId,
+      updatedAt: new Date().toISOString(),
+      artifacts: []
+    };
+    await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  }
+}
+
+async function touchMetadata(context) {
+  let metadata = {};
+  try {
+    metadata = JSON.parse(await fs.readFile(context.paths.metadataPath, "utf8"));
+  } catch {
+    metadata = { id: context.id, createdAt: new Date().toISOString() };
+  }
+  metadata.updatedAt = new Date().toISOString();
+  metadata.paths = context.paths;
+  metadata.config = publicRuntimeConfig(context.runtime);
+  await fs.writeFile(context.paths.metadataPath, `${JSON.stringify(metadata, null, 2)}\n`);
+}
+
+function publicSession(context, metadata = {}) {
+  return {
+    id: context.id,
+    goal: metadata.goal || "",
+    source: metadata.source || "",
+    warning: metadata.warning || "",
+    createdAt: metadata.createdAt || "",
+    updatedAt: metadata.updatedAt || "",
+    paths: context.paths,
+    config: publicRuntimeConfig(context.runtime)
+  };
+}
+
+function validateSessionId(sessionId) {
+  const id = String(sessionId || "").trim();
+  if (!SESSION_ID_PATTERN.test(id)) throw new Error("Invalid session id");
+  return id;
+}

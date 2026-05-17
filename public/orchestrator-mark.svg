@@ -1,0 +1,10 @@
+<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Agent orchestration graph">
+  <rect x="10" y="12" width="108" height="104" rx="18" fill="#F7FAF8"/>
+  <path d="M38 42L65 62L90 38" stroke="#26302E" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M38 86L65 62L91 88" stroke="#0F766E" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="38" cy="42" r="14" fill="#E4572E"/>
+  <circle cx="90" cy="38" r="14" fill="#0F766E"/>
+  <circle cx="38" cy="86" r="14" fill="#F0B429"/>
+  <circle cx="91" cy="88" r="14" fill="#26302E"/>
+  <circle cx="65" cy="62" r="18" fill="#FFFFFF" stroke="#26302E" stroke-width="6"/>
+</svg>
