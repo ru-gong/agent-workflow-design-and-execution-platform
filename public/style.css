@@ -182,7 +182,7 @@ a {
 .center-panel {
   min-width: 0;
   display: grid;
-  grid-template-rows: auto minmax(340px, 1fr) 190px;
+  grid-template-rows: auto minmax(300px, 1fr) clamp(300px, 34vh, 420px);
 }
 
 .panel-section {
@@ -2025,7 +2025,7 @@ svg.icon {
   }
 
   .center-panel {
-    grid-template-rows: auto 460px 260px;
+    grid-template-rows: auto 460px 360px;
   }
 
   .button-row,
