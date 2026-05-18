@@ -9,8 +9,9 @@ import { ROOT, badRequest, ensureDir, json, normalizeError, notFound, readJsonBo
 import { discoverSkills } from "./skills.js";
 import { getWeatherByCity } from "./weather.js";
 import { getRuntimeConfig, publicRuntimeConfig, saveConfig } from "./config.js";
-import { createSession, getSession, getSessionContext, getSessionManifest, saveCurrentPlan } from "./sessionStore.js";
+import { createSession, getSession, getSessionContext, getSessionManifest, saveCurrentPlan, updateSessionTitle } from "./sessionStore.js";
 import { pickFolder } from "./folderPicker.js";
+import { openLocalPath } from "./pathActions.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
@@ -87,6 +88,21 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  if (req.method === "POST" && url.pathname === "/api/open-path") {
+    const body = await readJsonBody(req);
+    try {
+      const result = await openLocalPath({
+        targetPath: body.path,
+        mode: body.mode,
+        runtime: await getRuntimeConfig()
+      });
+      json(res, 200, result);
+    } catch (error) {
+      json(res, error.statusCode || 500, { error: error.message || "打开路径失败。" });
+    }
+    return;
+  }
+
   if (req.method === "GET" && url.pathname === "/api/skills") {
     const runtime = await getRuntimeConfig();
     const toolProvider = normalizeToolProvider(url.searchParams.get("toolProvider") || runtime.toolProvider);
@@ -154,6 +170,14 @@ async function handleApi(req, res, url) {
   const sessionMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)$/);
   if (req.method === "GET" && sessionMatch) {
     json(res, 200, { session: await getSession(sessionMatch[1]) });
+    return;
+  }
+
+  const sessionTitleMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/title$/);
+  if ((req.method === "PUT" || req.method === "PATCH") && sessionTitleMatch) {
+    const body = await readJsonBody(req);
+    const session = await updateSessionTitle(sessionTitleMatch[1], body.title, { runtime: await getRuntimeConfig() });
+    json(res, 200, { ok: true, session });
     return;
   }
 
@@ -263,7 +287,8 @@ function runtimeForProvider(runtime, provider, { plannerModel = "", reasoningEff
 async function serveStatic(req, res, url) {
   const requested = url.pathname === "/" ? "/index.html" : decodeURIComponent(url.pathname);
   const target = path.normalize(path.join(PUBLIC_DIR, requested));
-  if (!target.startsWith(PUBLIC_DIR)) {
+  const relative = path.relative(PUBLIC_DIR, target);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
     notFound(res);
     return;
   }

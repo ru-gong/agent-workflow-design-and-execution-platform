@@ -40,6 +40,8 @@ npm test
 - `GET /api/config` / `PUT /api/config`：读取和保存 `orchestrator.config.json`，配置编程工具、项目文件夹、会话记录目录、产物目录、默认模型和推理强度。
 - `POST /api/plan`：调用当前选择的编程工具，用 `schemas/orchestration-plan.schema.json` 约束输出，生成可编辑编排；可传 `toolProvider`、`model` 与 `reasoningEffort` 控制规划工具、模型和推理强度。
 - `PUT /api/sessions/:id/plan`：保存人工调整后的当前编排到 session。
+- `PUT /api/sessions/:id/title`：保存用户自定义对话名称。创建 session 时会先按用户输入目标自动归纳一个名称。
+- `POST /api/open-path`：打开工作区、记录目录或产物目录内的文件，也可打开所在文件夹。
 - `POST /api/runs`：创建运行，按 DAG 依赖自动调度节点。
 - `GET /api/runs/:id/events`：通过 SSE 推送节点状态、日志和最终结果。
 - `POST /api/runs/:id/nodes/:nodeId/continue`：人工确认节点继续执行；也用于确认“需要时确认”的联网请求，确认后该节点会以联网高权限模式重跑。
@@ -58,7 +60,8 @@ Agent View 的核心不是“聊天窗口变多”，而是把多个后台 agent
 - Skill policy：自动编排只把人物视角、书籍框架、经验方法论等特色 skill 放入节点配置；`defuddle`、`mineru-pdf2md`、文档/表格/浏览器等通用 skill 留给执行时由节点执行工具自主调用。节点配置里的 skill 是必用项，并且会按当前编程工具隔离来源：Codex 只展示 Codex 可见 skill，Claude Code 只展示 Claude Code 可见 skill。
 - Dispatch：确认执行后，后端按 DAG 调度多个 agent 节点，支持有限并发。
 - Editing safety：节点增删/插入、拖拽、依赖、任务和 skill 修改支持工具栏撤回；画布空白处支持左键拖动整体移动节点布局，`Shift + 拖动` 保留为框选，`Cmd/Ctrl+Z` 可撤回。
-- Session artifact：每次生成编排会创建 `.orchestrator/sessions/<session-id>/`，包含 conversation、plan、当前编辑后的 plan、每次运行的 prompt/output/summary。真正面向用户的可交付产物写入 `artifacts/<session-id>/`。
+- Conversation title：每次生成编排会自动创建一个对话名称，用户可在画布顶部显眼位置直接修改并保存。
+- Session artifact：每次生成编排会创建 `.orchestrator/sessions/<session-id>/`，包含 conversation、plan、当前编辑后的 plan、每次运行的 prompt/output/summary。真正面向用户的可交付产物写入 `artifacts/<session-id>/`；过程产物和结果产物可在页面中一键打开或打开所在文件夹。
 
 ## Workspace, Sessions, And Artifacts
 
@@ -119,7 +122,7 @@ Agent View 的核心不是“聊天窗口变多”，而是把多个后台 agent
       ...
 ```
 
-页面左侧“运行设置”可以直接修改工具、路径和默认模型。目录项旁边的“选择”按钮会在 macOS 上弹出原生文件夹选择窗口，选完后点击“保存设置”生效；输入框保留为手动兜底。为了让 `workspace-write` 节点能写入产物，建议 `artifactRoot` 保持在 `workspaceRoot` 内。
+页面左侧“运行设置”可以直接修改工具、路径和默认模型。目录项旁边的“选择”按钮会在 macOS 和 Windows 上弹出原生文件夹选择窗口，选完后点击“保存设置”生效；输入框保留为手动兜底。为了让 `workspace-write` 节点能写入产物，建议 `artifactRoot` 保持在 `workspaceRoot` 内。
 
 ## Tool Integration
 
@@ -141,7 +144,7 @@ Skill 发现与当前 provider 绑定：选择 Codex 时扫描 `~/.codex/skills`
 节点也可单独配置 `model` 与 `reasoningEffort`，适合把简单检查设为 `low/medium`，把复杂实现设为更高 effort；左侧“推理”会传入计划生成，右侧节点配置可逐项调整执行推理强度。Claude Code 的 effort 选项会按当前模型动态收敛：Sonnet 显示 `low/medium/high/max`，Opus 4.7 显示 `low/medium/high/xhigh/max`，不声明支持 effort 的模型不会展示可选推理强度。执行过程气泡会根据当前画布可视区域自动选择位置并在必要时轻微滚动画布，确保用户能看到当前步骤的关键进展。
 当节点模式选择为“结果汇总 / Synthesis”时，右侧配置面板会出现“输出物要求”：可从 PPT、HTML、MD 文档、表格、图片、PDF、Word 文档和其他类型中选择，并补充人工说明。该要求会进入最终汇总节点的执行 prompt，用于约束最终答案和需要落盘的用户产物。
 当节点模式选择为“自动评审 / Auto Review”时，右侧配置面板会出现自动评审策略：可设置最大迭代次数、返工目标节点、评审标准和达到上限后是否继续推进。执行时该节点会读取上游输出并返回 `pass`、`iterate` 或 `capped` 判定；在未达到上限时会把返工说明打回目标节点重新运行，达到上限后保留问题建议并继续下游，避免死循环。
-当前模型接入方式是本机 CLI：Codex 调用 `codex exec -m <model> -c model_reasoning_effort="<effort>"`，Claude Code 调用 `claude -p --model <model> --effort <effort>`。网页不会保存 API Key；鉴权、账号和模型可用性由本机工具环境负责。
+当前模型接入方式是本机 CLI：Codex 调用 `codex exec -m <model> -c model_reasoning_effort="<effort>"`，Claude Code 调用 `claude -p --model <model> --effort <effort>`。网页不会保存 API Key；鉴权、账号和模型可用性由本机工具环境负责。Windows 环境下会保留 `C:\...` 盘符路径，并用 shell 兼容方式启动本机 CLI，避免 npm 安装的 `.cmd` 命令无法检测或执行。
 
 ## Project Layout
 

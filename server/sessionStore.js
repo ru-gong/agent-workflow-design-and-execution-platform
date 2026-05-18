@@ -10,6 +10,7 @@ export async function createSession({ goal, plan, source = "manual", warning = "
   const now = new Date().toISOString();
   const metadata = {
     id: context.id,
+    title: summarizeSessionTitle(goal, plan?.name),
     goal: clampText(goal, 4000),
     source,
     warning: clampText(warning, 1000),
@@ -61,6 +62,27 @@ export async function saveCurrentPlan(sessionId, plan, { reason = "plan:edited",
   await appendSessionEvent(context.id, {
     type: reason,
     nodeCount: Array.isArray(plan?.nodes) ? plan.nodes.length : 0
+  }, context.runtime);
+  return getSession(context.id, context.runtime);
+}
+
+export async function updateSessionTitle(sessionId, title, { runtime } = {}) {
+  const context = await getSessionContext(sessionId, runtime);
+  await ensureDir(context.paths.sessionDir);
+  let metadata = {};
+  try {
+    metadata = JSON.parse(await fs.readFile(context.paths.metadataPath, "utf8"));
+  } catch {
+    metadata = { id: context.id, createdAt: new Date().toISOString() };
+  }
+  metadata.title = sanitizeSessionTitle(title || metadata.goal || context.id);
+  metadata.updatedAt = new Date().toISOString();
+  metadata.paths = context.paths;
+  metadata.config = publicRuntimeConfig(context.runtime);
+  await fs.writeFile(context.paths.metadataPath, `${JSON.stringify(metadata, null, 2)}\n`);
+  await appendSessionEvent(context.id, {
+    type: "session:title-updated",
+    title: metadata.title
   }, context.runtime);
   return getSession(context.id, context.runtime);
 }
@@ -152,6 +174,7 @@ async function touchMetadata(context) {
 function publicSession(context, metadata = {}) {
   return {
     id: context.id,
+    title: metadata.title || summarizeSessionTitle(metadata.goal || "", ""),
     goal: metadata.goal || "",
     source: metadata.source || "",
     warning: metadata.warning || "",
@@ -160,6 +183,26 @@ function publicSession(context, metadata = {}) {
     paths: context.paths,
     config: publicRuntimeConfig(context.runtime)
   };
+}
+
+export function summarizeSessionTitle(goal = "", fallback = "") {
+  const cleanGoal = String(goal || "")
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^[\s:：,，。.!！?？、-]*(请|帮我|我想|我希望|希望|需要|给我|麻烦|请你|能不能|可以)?\s*/i, "")
+    .trim();
+  const source = cleanGoal || fallback || "新对话";
+  const firstClause = source.split(/[。.!！?？；;，,]/).find(Boolean) || source;
+  return sanitizeSessionTitle(firstClause);
+}
+
+function sanitizeSessionTitle(value = "") {
+  const text = String(value || "")
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) return "新对话";
+  return text.length > 36 ? `${text.slice(0, 35)}...` : text;
 }
 
 function validateSessionId(sessionId) {

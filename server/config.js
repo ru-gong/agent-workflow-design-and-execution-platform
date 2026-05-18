@@ -121,7 +121,7 @@ function resolveConfigPath(base, value) {
 
 function cleanPathValue(value, fallback) {
   const text = cleanText(value, fallback);
-  return text.replace(/[<>:"|?*]/g, "").trim() || fallback;
+  return text.replace(/\0/g, "").trim() || fallback;
 }
 
 function cleanText(value, fallback) {

@@ -34,6 +34,8 @@ npm test
 - `GET /api/config` / `PUT /api/config`: reads and saves `orchestrator.config.json`, including the selected tool provider, project paths, session storage, artifact output paths, default models, and reasoning effort.
 - `POST /api/plan`: asks the selected tool provider to generate an editable orchestration plan constrained by `schemas/orchestration-plan.schema.json`.
 - `PUT /api/sessions/:id/plan`: saves the human-edited plan into the session.
+- `PUT /api/sessions/:id/title`: saves a user-edited conversation title. New sessions first derive a title from the user's goal.
+- `POST /api/open-path`: opens a file or containing folder under the configured workspace, session storage, or artifact root.
 - `POST /api/runs`: creates a run and schedules nodes according to DAG dependencies.
 - `GET /api/runs/:id/events`: streams node status, logs, and final results through SSE.
 - `POST /api/runs/:id/nodes/:nodeId/continue`: resumes a paused human review node or a node waiting for network permission.
@@ -52,7 +54,8 @@ Agent View is not just multiple chat windows. It is a single operational view fo
 - Skill policy: specialty skills can be attached to planned nodes, while generic tools such as browser, document, spreadsheet, PDF extraction, and web scraping remain available to the executor at runtime.
 - Dispatch: confirmed runs execute multiple agent nodes by DAG dependency order with limited concurrency.
 - Editing safety: node changes, dependencies, tasks, and skill edits support undo. The canvas supports drag-to-pan and box selection.
-- Session artifacts: each plan creates `.orchestrator/sessions/<session-id>/` for internal records and `artifacts/<session-id>/` for user-facing outputs.
+- Conversation title: each generated workflow gets a visible, editable conversation name at the top of the canvas.
+- Session artifacts: each plan creates `.orchestrator/sessions/<session-id>/` for internal records and `artifacts/<session-id>/` for user-facing outputs. Process and result artifacts can be opened directly from the UI, including their containing folders.
 
 ## Workspace, Sessions, And Artifacts
 
@@ -113,7 +116,7 @@ project-root/
       ...
 ```
 
-The "Run Settings" panel can edit providers, paths, and default models. On macOS, folder picker buttons can open native directory selection. Keeping `artifactRoot` inside `workspaceRoot` is recommended so `workspace-write` nodes can write deliverables safely.
+The "Run Settings" panel can edit providers, paths, and default models. On macOS and Windows, folder picker buttons can open native directory selection. Keeping `artifactRoot` inside `workspaceRoot` is recommended so `workspace-write` nodes can write deliverables safely.
 
 ## Tool Integration
 

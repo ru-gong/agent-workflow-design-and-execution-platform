@@ -16,7 +16,9 @@ const icons = {
   zoomIn: svg("M12 5v14M5 12h14"),
   zoomOut: svg("M5 12h14"),
   fit: svg("M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"),
-  close: svg("M18 6L6 18M6 6l12 12")
+  close: svg("M18 6L6 18M6 6l12 12"),
+  open: svg("M14 3h7v7M21 3l-9 9M5 7h5M5 12h7M5 17h14"),
+  folder: svg("M3 6h6l2 2h10v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z")
 };
 
 const TOOL_PROVIDERS = {
@@ -72,6 +74,7 @@ const state = {
   session: null,
   sessionSaveTimer: null,
   sessionSaveStatus: "",
+  sessionTitleSaveStatus: "",
   undoStack: [],
   lastHistoryState: null
 };
@@ -332,6 +335,7 @@ function initButtons() {
   $("zoomInBtn").innerHTML = icons.zoomIn;
   $("fitCanvasBtn").innerHTML = icons.fit;
   $("closeReviewBtn").innerHTML = icons.close;
+  $("saveConversationTitleBtn").textContent = "保存";
 }
 
 async function loadHealth() {
@@ -616,6 +620,7 @@ async function generatePlan() {
     sanitizeUnavailablePlanSkills(state.plan);
     state.session = data.session || null;
     state.sessionSaveStatus = state.session ? "已保存" : "";
+    state.sessionTitleSaveStatus = state.session ? "已自动命名" : "";
     state.selectedNodeId = state.plan.nodes[0]?.id || "";
     state.selectedNodeIds = new Set(state.selectedNodeId ? [state.selectedNodeId] : []);
     state.run = null;
@@ -659,6 +664,7 @@ function renderAll() {
   renderCanvas();
   renderInspector();
   renderSkills();
+  ensureArtifactManifestLoaded();
   renderRun();
   renderReviewDialog();
   renderUndoControls();
@@ -666,9 +672,28 @@ function renderAll() {
 }
 
 function renderPlanHeader() {
+  renderConversationTitle();
   $("planName").textContent = state.plan?.name || "等待生成编排";
   $("planSummary").textContent = state.plan?.summary || `输入需求后，让 ${toolLabel(currentToolProvider())} 生成可编辑的 DAG 任务流。`;
   renderSessionMeta();
+}
+
+function renderConversationTitle() {
+  const input = $("conversationTitleInput");
+  const button = $("saveConversationTitleBtn");
+  const status = $("conversationTitleStatus");
+  if (!input || !button || !status) return;
+  const hasSession = Boolean(state.session?.id);
+  const title = state.session?.title || "";
+  input.disabled = !hasSession;
+  button.disabled = !hasSession;
+  if (document.activeElement !== input) {
+    input.value = title;
+  }
+  status.textContent = hasSession
+    ? (state.sessionTitleSaveStatus || "可直接修改后保存")
+    : "生成工作流后自动创建名称";
+  status.classList.toggle("bad", /失败|错误/.test(state.sessionTitleSaveStatus || ""));
 }
 
 function renderSessionMeta() {
@@ -680,6 +705,40 @@ function renderSessionMeta() {
   }
   const save = state.sessionSaveStatus ? ` · ${state.sessionSaveStatus}` : "";
   box.textContent = `Session ${state.session.id}${save} · ${state.session.paths?.artifactDir || ""}`;
+}
+
+async function saveConversationTitle() {
+  if (!state.session?.id) return;
+  const input = $("conversationTitleInput");
+  const title = input.value.trim();
+  if (!title) {
+    state.sessionTitleSaveStatus = "名称不能为空";
+    renderConversationTitle();
+    return;
+  }
+  if (title === state.session.title) {
+    state.sessionTitleSaveStatus = "已保存";
+    renderConversationTitle();
+    return;
+  }
+  setBusy($("saveConversationTitleBtn"), true, `${icons.refresh}<span>保存中</span>`);
+  state.sessionTitleSaveStatus = "保存中";
+  renderConversationTitle();
+  try {
+    const data = await api(`/api/sessions/${encodeURIComponent(state.session.id)}/title`, {
+      method: "PUT",
+      body: JSON.stringify({ title })
+    });
+    state.session = data.session || state.session;
+    state.sessionTitleSaveStatus = "已保存";
+    renderPlanHeader();
+    renderArtifactQuickPanel();
+  } catch (error) {
+    state.sessionTitleSaveStatus = `保存失败：${error.message}`;
+    renderConversationTitle();
+  } finally {
+    setBusy($("saveConversationTitleBtn"), false, "保存");
+  }
 }
 
 function isNodeSelected(nodeId) {
@@ -2315,6 +2374,7 @@ function renderRun() {
     $("runMeta").textContent = "等待确认。";
   }
   $("stopRunBtn").classList.toggle("hidden", !run || !["running", "waiting"].includes(run.status));
+  renderArtifactQuickPanel();
 
   const timeline = $("runTimeline");
   timeline.innerHTML = "";
@@ -2448,7 +2508,7 @@ function getReviewUpstreamNodes(node) {
   return upstreamNodes.filter((item) => item.id !== node.id);
 }
 
-function ensureReviewManifestLoaded() {
+function ensureArtifactManifestLoaded() {
   const sessionId = state.run?.sessionId || state.session?.id || "";
   if (!sessionId || state.reviewManifestSessionId === sessionId) return;
   state.reviewManifestSessionId = sessionId;
@@ -2460,6 +2520,7 @@ function ensureReviewManifestLoaded() {
       state.reviewManifest = data.manifest || null;
       state.reviewManifestError = "";
       renderReviewArtifacts();
+      renderArtifactQuickPanel();
     })
     .catch((error) => {
       if (state.reviewManifestSessionId !== sessionId) return;
@@ -2468,7 +2529,72 @@ function ensureReviewManifestLoaded() {
         ? "产物清单接口需要服务重启后生效；当前仍可查看上方节点输出和产物目录。"
         : error.message || "产物清单读取失败。";
       renderReviewArtifacts();
+      renderArtifactQuickPanel();
     });
+}
+
+function ensureReviewManifestLoaded() {
+  ensureArtifactManifestLoaded();
+}
+
+function renderArtifactQuickPanel() {
+  const panel = $("artifactQuickPanel");
+  if (!panel) return;
+  const paths = state.run?.paths || state.session?.paths || {};
+  const rows = [
+    { label: "过程产物", path: paths.runDir || paths.sessionDir },
+    { label: "结果产物", path: paths.artifactDir },
+    { label: "Manifest", path: paths.manifestPath }
+  ].filter((row) => row.path);
+  const artifacts = relevantManifestArtifacts(new Set()).slice(0, 6);
+  panel.innerHTML = "";
+  panel.classList.toggle("hidden", !rows.length && !artifacts.length && !state.reviewManifestError);
+  if (!rows.length && !artifacts.length && !state.reviewManifestError) return;
+
+  const head = document.createElement("div");
+  head.className = "artifact-quick-head";
+  head.innerHTML = `<span>产物快捷入口</span><small>${escapeHtml(state.session?.title || state.session?.id || "当前会话")}</small>`;
+  panel.appendChild(head);
+
+  const pathGrid = document.createElement("div");
+  pathGrid.className = "artifact-path-grid";
+  for (const row of rows) {
+    pathGrid.appendChild(createArtifactPathRow(row.label, row.path, { compact: true }));
+  }
+  panel.appendChild(pathGrid);
+
+  if (state.reviewManifestError) {
+    const warning = document.createElement("div");
+    warning.className = "artifact-warning";
+    warning.textContent = state.reviewManifestError;
+    panel.appendChild(warning);
+  } else if (state.reviewManifestSessionId && !state.reviewManifest) {
+    const loading = document.createElement("div");
+    loading.className = "artifact-warning";
+    loading.textContent = "正在读取产物清单...";
+    panel.appendChild(loading);
+  } else if (artifacts.length) {
+    const list = document.createElement("div");
+    list.className = "artifact-manifest-grid";
+    for (const artifact of artifacts) {
+      const targetPath = artifactPath(artifact);
+      const item = document.createElement("article");
+      item.className = "artifact-manifest-card";
+      item.innerHTML = `
+        <div class="artifact-card-copy">
+          <strong></strong>
+          <span></span>
+          <code></code>
+        </div>
+      `;
+      item.querySelector("strong").textContent = artifact.title || artifact.name || basename(targetPath || "未命名产物");
+      item.querySelector("span").textContent = artifact.description || artifact.summary || artifact.sourceNodeId || artifact.nodeId || "已登记产物";
+      item.querySelector("code").textContent = targetPath || "未登记路径";
+      item.appendChild(createPathActions(targetPath));
+      list.appendChild(item);
+    }
+    panel.appendChild(list);
+  }
 }
 
 function renderReviewArtifacts() {
@@ -2495,11 +2621,7 @@ function renderReviewArtifacts() {
     const pathsBox = document.createElement("div");
     pathsBox.className = "review-artifact-paths";
     for (const [label, value] of rows) {
-      const row = document.createElement("div");
-      row.className = "review-artifact-row";
-      row.innerHTML = `<span>${escapeHtml(label)}</span><strong></strong>`;
-      row.querySelector("strong").textContent = value;
-      pathsBox.appendChild(row);
+      pathsBox.appendChild(createArtifactPathRow(label, value));
     }
     box.appendChild(pathsBox);
   }
@@ -2521,13 +2643,17 @@ function renderReviewArtifacts() {
       const item = document.createElement("article");
       item.className = "review-manifest-item";
       item.innerHTML = `
-        <div class="review-manifest-title"></div>
-        <div class="review-manifest-desc"></div>
-        <div class="review-manifest-path"></div>
+        <div class="review-manifest-copy">
+          <div class="review-manifest-title"></div>
+          <div class="review-manifest-desc"></div>
+          <div class="review-manifest-path"></div>
+        </div>
       `;
-      item.querySelector(".review-manifest-title").textContent = artifact.title || artifact.name || basename(artifact.path || artifact.file || "未命名产物");
+      const targetPath = artifactPath(artifact);
+      item.querySelector(".review-manifest-title").textContent = artifact.title || artifact.name || basename(targetPath || "未命名产物");
       item.querySelector(".review-manifest-desc").textContent = artifact.description || artifact.summary || artifact.sourceNodeId || artifact.nodeId || "已登记产物";
-      item.querySelector(".review-manifest-path").textContent = artifact.path || artifact.file || artifact.href || "";
+      item.querySelector(".review-manifest-path").textContent = targetPath;
+      item.appendChild(createPathActions(targetPath));
       artifactList.appendChild(item);
     }
     box.appendChild(artifactList);
@@ -2537,6 +2663,71 @@ function renderReviewArtifacts() {
     empty.textContent = "产物清单中暂未登记上游节点的文件产物；可先查看上方节点输出里的路径。";
     box.appendChild(empty);
   }
+}
+
+function createArtifactPathRow(label, value, { compact = false, openItem = true } = {}) {
+  const row = document.createElement("div");
+  row.className = `review-artifact-row ${compact ? "compact" : ""}`;
+  row.innerHTML = `<span></span><strong></strong>`;
+  row.querySelector("span").textContent = label;
+  row.querySelector("strong").textContent = value;
+  row.appendChild(createPathActions(value, { openItem }));
+  return row;
+}
+
+function createPathActions(targetPath, { openItem = true } = {}) {
+  const actions = document.createElement("div");
+  actions.className = "path-actions";
+  const canOpen = isOpenablePath(targetPath);
+  if (openItem) {
+    actions.appendChild(createPathActionButton("打开", icons.open, targetPath, "item", canOpen));
+  }
+  actions.appendChild(createPathActionButton("所在文件夹", icons.folder, targetPath, "folder", canOpen));
+  return actions;
+}
+
+function createPathActionButton(label, icon, targetPath, mode, enabled) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "path-action-button";
+  button.innerHTML = `${icon}<span>${escapeHtml(label)}</span>`;
+  button.disabled = !enabled;
+  button.title = enabled ? label : "当前不是本地文件路径";
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    openPathFromUi(targetPath, mode, button);
+  });
+  return button;
+}
+
+async function openPathFromUi(targetPath, mode, button) {
+  if (!isOpenablePath(targetPath)) return;
+  const original = button.innerHTML;
+  button.disabled = true;
+  button.innerHTML = `${icons.refresh}<span>打开中</span>`;
+  button.querySelector(".icon")?.classList.add("spin");
+  try {
+    const data = await api("/api/open-path", {
+      method: "POST",
+      body: JSON.stringify({ path: targetPath, mode })
+    });
+    showNotice(`${mode === "folder" ? "已打开所在文件夹" : "已打开产物"}：${data.path || targetPath}`);
+  } catch (error) {
+    showNotice(error.message || "打开失败", "bad");
+  } finally {
+    button.disabled = false;
+    button.innerHTML = original;
+  }
+}
+
+function artifactPath(artifact) {
+  return String(artifact?.path || artifact?.file || artifact?.filePath || artifact?.href || "").trim();
+}
+
+function isOpenablePath(value) {
+  const text = String(value || "").trim();
+  return Boolean(text) && !/^[a-z][a-z0-9+.-]*:/i.test(text.replace(/^[a-z]:[\\/]/i, ""));
 }
 
 function relevantManifestArtifacts(upstreamIds) {
@@ -2636,6 +2827,20 @@ function bindEvents() {
   $("toolProviderInput").addEventListener("change", (event) => selectToolProvider(event.target.value, { confirmed: true, persist: true }));
   $("settingsToolProviderInput").addEventListener("change", (event) => selectToolProvider(event.target.value, { confirmed: true, persist: false }));
   $("saveConfigBtn").addEventListener("click", saveConfigFromForm);
+  $("saveConversationTitleBtn").addEventListener("click", saveConversationTitle);
+  $("conversationTitleInput").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      saveConversationTitle();
+      event.currentTarget.blur();
+    }
+  });
+  $("conversationTitleInput").addEventListener("input", () => {
+    if (state.session?.id) {
+      state.sessionTitleSaveStatus = "有未保存修改";
+      $("conversationTitleStatus").textContent = state.sessionTitleSaveStatus;
+    }
+  });
   $("undoBtn").addEventListener("click", undoPlanChange);
   $("pickWorkspaceRootBtn").addEventListener("click", (event) => {
     pickConfigFolder("workspaceRootInput", "workspaceRootPath", "选择项目文件夹", event.currentTarget);

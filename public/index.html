@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Agent Workflow Design and Execution Platform</title>
-    <link rel="stylesheet" href="/style.css?v=20260517-product-name" />
+    <link rel="stylesheet" href="/style.css?v=20260518-session-artifacts" />
   </head>
   <body>
     <div class="app-shell">
@@ -153,6 +153,14 @@
         <section class="center-panel">
           <div class="canvas-toolbar">
             <div>
+              <div class="conversation-name-card">
+                <div class="conversation-name-label">对话名称</div>
+                <div class="conversation-name-control">
+                  <input id="conversationTitleInput" class="conversation-title-input" value="" placeholder="生成后自动命名，可直接修改" disabled />
+                  <button id="saveConversationTitleBtn" class="mini-button" type="button" disabled>保存</button>
+                </div>
+                <div id="conversationTitleStatus" class="conversation-title-status">生成工作流后自动创建名称</div>
+              </div>
               <div id="planName" class="plan-name">等待生成编排</div>
               <div id="planSummary" class="plan-summary">输入需求后，让编程工具生成可编辑的 Agent 工作流。</div>
               <div id="sessionMeta" class="session-meta">尚未创建会话。</div>
@@ -196,6 +204,7 @@
               </div>
               <button id="clearLogsBtn" class="mini-button" type="button"></button>
             </div>
+            <div id="artifactQuickPanel" class="artifact-quick-panel"></div>
             <div id="runTimeline" class="run-timeline"></div>
             <pre id="logOutput" class="log-output"></pre>
           </div>
@@ -262,6 +271,6 @@
       <button class="skill-chip" type="button"></button>
     </template>
 
-    <script type="module" src="/app.js?v=20260517-auto-review"></script>
+    <script type="module" src="/app.js?v=20260518-session-artifacts"></script>
   </body>
 </html>
