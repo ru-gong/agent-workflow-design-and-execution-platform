@@ -55,7 +55,7 @@ Agent View is not just multiple chat windows. It is a single operational view fo
 - Dispatch: confirmed runs execute multiple agent nodes by DAG dependency order with limited concurrency.
 - Editing safety: node changes, dependencies, tasks, and skill edits support undo. The canvas supports drag-to-pan and box selection.
 - Conversation title: each generated workflow gets a visible, editable conversation name at the top of the canvas.
-- Session artifacts: each plan creates `.orchestrator/sessions/<session-id>/` for internal records and `artifacts/<session-id>/` for user-facing outputs. Process and result artifacts can be opened directly from the UI, including their containing folders.
+- Session artifacts: each plan creates `.orchestrator/sessions/<session-id>/` for internal records and `artifacts/<session-id>/` for user-facing outputs. The artifact folder also gets `对话命名.md`, a markdown note that records the current conversation title, original goal, and related paths; it is updated when the user renames the conversation. Process and result artifacts can be opened directly from the UI, including their containing folders.
 
 ## Workspace, Sessions, And Artifacts
 
@@ -113,6 +113,7 @@ project-root/
   artifacts/
     <session-id>/
       manifest.json
+      对话命名.md
       ...
 ```
 

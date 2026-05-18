@@ -61,7 +61,7 @@ Agent View 的核心不是“聊天窗口变多”，而是把多个后台 agent
 - Dispatch：确认执行后，后端按 DAG 调度多个 agent 节点，支持有限并发。
 - Editing safety：节点增删/插入、拖拽、依赖、任务和 skill 修改支持工具栏撤回；画布空白处支持左键拖动整体移动节点布局，`Shift + 拖动` 保留为框选，`Cmd/Ctrl+Z` 可撤回。
 - Conversation title：每次生成编排会自动创建一个对话名称，用户可在画布顶部显眼位置直接修改并保存。
-- Session artifact：每次生成编排会创建 `.orchestrator/sessions/<session-id>/`，包含 conversation、plan、当前编辑后的 plan、每次运行的 prompt/output/summary。真正面向用户的可交付产物写入 `artifacts/<session-id>/`；过程产物和结果产物可在页面中一键打开或打开所在文件夹。
+- Session artifact：每次生成编排会创建 `.orchestrator/sessions/<session-id>/`，包含 conversation、plan、当前编辑后的 plan、每次运行的 prompt/output/summary。真正面向用户的可交付产物写入 `artifacts/<session-id>/`；其中会自动生成 `对话命名.md` 记录当前对话名称、原始需求和相关路径，用户改名后会同步更新。过程产物和结果产物可在页面中一键打开或打开所在文件夹。
 
 ## Workspace, Sessions, And Artifacts
 
@@ -119,6 +119,7 @@ Agent View 的核心不是“聊天窗口变多”，而是把多个后台 agent
   artifacts/
     <session-id>/
       manifest.json
+      对话命名.md
       ...
 ```
 

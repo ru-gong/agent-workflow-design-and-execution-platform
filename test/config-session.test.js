@@ -4,7 +4,14 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { normalizeConfig, resolveRuntimeConfig } from "../server/config.js";
-import { createSession, getSessionManifest, saveCurrentPlan, summarizeSessionTitle, updateSessionTitle } from "../server/sessionStore.js";
+import {
+  SESSION_TITLE_DOCUMENT_NAME,
+  createSession,
+  getSessionManifest,
+  saveCurrentPlan,
+  summarizeSessionTitle,
+  updateSessionTitle
+} from "../server/sessionStore.js";
 
 test("resolveRuntimeConfig anchors storage and artifacts under workspace root", () => {
   const runtime = resolveRuntimeConfig(
@@ -86,6 +93,8 @@ test("createSession persists conversation, plans, and artifact manifest", async 
   const session = await createSession({ goal: "build demo", plan, source: "test", runtime });
   assert.match(session.id, /^session-/);
   assert.equal(session.title, "build demo");
+  const titleDocumentPath = path.join(session.paths.artifactDir, SESSION_TITLE_DOCUMENT_NAME);
+  assert.match(await fs.readFile(titleDocumentPath, "utf8"), /当前名称：build demo/);
   assert.equal(JSON.parse(await fs.readFile(path.join(session.paths.artifactDir, "manifest.json"), "utf8")).sessionId, session.id);
   assert.equal(JSON.parse(await fs.readFile(path.join(session.paths.sessionDir, "plan.json"), "utf8")).name, "Demo");
 
@@ -108,13 +117,18 @@ test("createSession persists conversation, plans, and artifact manifest", async 
   await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
   const loadedManifest = await getSessionManifest(session.id, runtime);
-  assert.equal(loadedManifest.manifest.artifacts[0].title, "Demo Report");
+  assert.equal(loadedManifest.manifest.artifacts.some((artifact) => artifact.title === "Demo Report"), true);
   assert.equal(loadedManifest.paths.manifestPath, manifestPath);
 
   const renamed = await updateSessionTitle(session.id, "自定义对话名称", { runtime });
   assert.equal(renamed.title, "自定义对话名称");
   const renamedMetadata = JSON.parse(await fs.readFile(path.join(session.paths.sessionDir, "metadata.json"), "utf8"));
   assert.equal(renamedMetadata.title, "自定义对话名称");
+  const renamedTitleDocument = await fs.readFile(titleDocumentPath, "utf8");
+  assert.match(renamedTitleDocument, /当前名称：自定义对话名称/);
+  assert.match(renamedTitleDocument, new RegExp(`Session ID：\\\`${session.id}\\\``));
+  const updatedManifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
+  assert.equal(updatedManifest.artifacts.some((artifact) => artifact.path === titleDocumentPath && artifact.title === "对话命名"), true);
 });
 
 test("summarizeSessionTitle derives concise names from user goals", () => {

@@ -4,6 +4,7 @@ import { clampText, ensureDir, safeId } from "./utils.js";
 import { getRuntimeConfig, publicRuntimeConfig } from "./config.js";
 
 const SESSION_ID_PATTERN = /^[a-z0-9-]+$/i;
+export const SESSION_TITLE_DOCUMENT_NAME = "对话命名.md";
 
 export async function createSession({ goal, plan, source = "manual", warning = "", raw = "", runtime } = {}) {
   const context = await buildSessionContext(safeId("session"), runtime);
@@ -24,6 +25,7 @@ export async function createSession({ goal, plan, source = "manual", warning = "
   await ensureDir(context.paths.artifactDir);
   await ensureManifest(context.paths.manifestPath, context.id);
   await fs.writeFile(context.paths.metadataPath, `${JSON.stringify(metadata, null, 2)}\n`);
+  await writeSessionTitleDocument(context, metadata);
   if (plan) {
     await fs.writeFile(context.paths.planPath, `${JSON.stringify(plan, null, 2)}\n`);
     await fs.writeFile(context.paths.currentPlanPath, `${JSON.stringify(plan, null, 2)}\n`);
@@ -80,6 +82,7 @@ export async function updateSessionTitle(sessionId, title, { runtime } = {}) {
   metadata.paths = context.paths;
   metadata.config = publicRuntimeConfig(context.runtime);
   await fs.writeFile(context.paths.metadataPath, `${JSON.stringify(metadata, null, 2)}\n`);
+  await writeSessionTitleDocument(context, metadata);
   await appendSessionEvent(context.id, {
     type: "session:title-updated",
     title: metadata.title
@@ -169,6 +172,7 @@ async function touchMetadata(context) {
   metadata.paths = context.paths;
   metadata.config = publicRuntimeConfig(context.runtime);
   await fs.writeFile(context.paths.metadataPath, `${JSON.stringify(metadata, null, 2)}\n`);
+  await writeSessionTitleDocument(context, metadata);
 }
 
 function publicSession(context, metadata = {}) {
@@ -203,6 +207,56 @@ function sanitizeSessionTitle(value = "") {
     .trim();
   if (!text) return "新对话";
   return text.length > 36 ? `${text.slice(0, 35)}...` : text;
+}
+
+async function writeSessionTitleDocument(context, metadata = {}) {
+  await ensureDir(context.paths.artifactDir);
+  await ensureManifest(context.paths.manifestPath, context.id);
+  const title = metadata.title || summarizeSessionTitle(metadata.goal || "", "");
+  const titlePath = path.join(context.paths.artifactDir, SESSION_TITLE_DOCUMENT_NAME);
+  const content = [
+    "# 对话命名",
+    "",
+    `- 当前名称：${markdownInline(title)}`,
+    `- Session ID：\`${context.id}\``,
+    `- 原始需求：${markdownInline(metadata.goal || "")}`,
+    `- 创建时间：${markdownInline(metadata.createdAt || "")}`,
+    `- 最近更新：${markdownInline(metadata.updatedAt || new Date().toISOString())}`,
+    `- 会话记录目录：\`${context.paths.sessionDir}\``,
+    `- 产物目录：\`${context.paths.artifactDir}\``,
+    "",
+    "> 本文件由系统自动生成。用户在界面修改对话名称后，会同步更新这里记录的当前名称。",
+    ""
+  ].join("\n");
+  await fs.writeFile(titlePath, content);
+  await upsertTitleDocumentManifest(context, titlePath);
+}
+
+async function upsertTitleDocumentManifest(context, titlePath) {
+  let manifest;
+  try {
+    manifest = JSON.parse(await fs.readFile(context.paths.manifestPath, "utf8"));
+  } catch {
+    manifest = { sessionId: context.id, artifacts: [] };
+  }
+  if (!Array.isArray(manifest.artifacts)) manifest.artifacts = [];
+  const artifact = {
+    path: titlePath,
+    sourceNodeId: "__session__",
+    title: "对话命名",
+    description: "记录当前对话名称、原始需求与会话产物路径。"
+  };
+  const existingIndex = manifest.artifacts.findIndex((item) => path.normalize(String(item.path || "")) === path.normalize(titlePath));
+  if (existingIndex >= 0) manifest.artifacts[existingIndex] = { ...manifest.artifacts[existingIndex], ...artifact };
+  else manifest.artifacts.unshift(artifact);
+  manifest.sessionId = manifest.sessionId || context.id;
+  manifest.updatedAt = new Date().toISOString();
+  await fs.writeFile(context.paths.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+function markdownInline(value = "") {
+  const text = String(value || "").replace(/[\r\n]+/g, " ").trim();
+  return text ? text.replace(/[\\`*_{}[\]()#+.!|-]/g, "\\$&") : "未记录";
 }
 
 function validateSessionId(sessionId) {
