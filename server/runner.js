@@ -503,10 +503,22 @@ ${networkRules.join("\n")}
       docx: "Word document / DOCX",
       other: "custom deliverable"
     };
-    const custom = requirement.custom.trim();
+    const instructions = {
+      ppt: "Create an actual PPT/PPTX deck or presentation-ready slide source under the artifact directory and register it in manifest.json. Do not deliver only a Markdown report when PPT is selected.",
+      html: "Create a usable HTML file under the artifact directory and register it in manifest.json. Do not deliver only a Markdown report when HTML is selected.",
+      markdown: "Create a Markdown document when a file artifact is useful, and register it in manifest.json.",
+      spreadsheet: "Create a spreadsheet/table artifact such as CSV or XLSX under the artifact directory and register it in manifest.json.",
+      image: "Create or provide an image artifact under the artifact directory and register it in manifest.json.",
+      pdf: "Create a PDF artifact under the artifact directory and register it in manifest.json.",
+      docx: "Create a DOCX/Word-compatible artifact under the artifact directory and register it in manifest.json.",
+      other: "Create the custom deliverable requested by the user under the artifact directory and register it in manifest.json."
+    };
+    const custom = normalizeOutputRequirementCustom(requirement.custom, requirement.type);
     return [
       `- Required final output type: ${labels[requirement.type] || labels.markdown} (${requirement.type}).`,
+      "- The selected output type above is authoritative. If any user-supplied wording mentions a different file format, treat that wording as stale format text and preserve only the useful audience/content details.",
       custom ? `- User-supplied output requirement: ${custom}` : "- User-supplied output requirement: (none).",
+      `- Type-specific instruction: ${instructions[requirement.type] || instructions.markdown}`,
       "- Shape the final answer and any user-facing artifacts around this requirement.",
       "- If the requested type needs a file artifact and the sandbox allows writing, create it under the artifact directory and register it in manifest.json."
     ].join("\n");
@@ -898,6 +910,25 @@ function collectRunDescendantIds(plan, startIds = []) {
 function executorModelFromEnv(provider) {
   if (provider === "claude") return process.env.CLAUDE_EXEC_MODEL || process.env.AGENT_EXEC_MODEL || "";
   return process.env.CODEX_EXEC_MODEL || process.env.AGENT_EXEC_MODEL || "";
+}
+
+function normalizeOutputRequirementCustom(custom, type) {
+  let text = String(custom || "").trim().slice(0, 600);
+  if (!text || type === "markdown") return text;
+  const replacement = {
+    ppt: "PPT 汇报材料",
+    html: "HTML 单页报告",
+    spreadsheet: "表格交付物",
+    image: "图片交付物",
+    pdf: "PDF 报告",
+    docx: "Word 文档",
+    other: "指定交付物"
+  }[type] || "指定交付物";
+  return text
+    .replace(/中文\s*Markdown\s*深度研究报告/gi, `中文${replacement}`)
+    .replace(/Markdown\s*深度研究报告/gi, replacement)
+    .replace(/中文\s*MD\s*文档/gi, `中文${replacement}`)
+    .replace(/MD\s*文档|MD文档|Markdown|\.md\b/gi, replacement);
 }
 
 function sleep(ms) {

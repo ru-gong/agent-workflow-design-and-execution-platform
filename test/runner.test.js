@@ -197,6 +197,45 @@ test("RunManager includes synthesis output requirements in node prompts", () => 
   assert.match(prompt, /artifact directory/);
 });
 
+test("RunManager treats selected output type as authoritative over stale custom text", () => {
+  const manager = new RunManager({ root: process.cwd() });
+  const prompt = manager.nodePrompt(
+    {
+      goal: "prepare DJI opportunity materials",
+      plan: { name: "PPT Output Flow", nodes: [] },
+      nodes: {},
+      workspaceRoot: process.cwd(),
+      sessionDir: "/tmp/session",
+      runDir: "/tmp/run",
+      artifactDir: "/tmp/artifacts"
+    },
+    {
+      id: "final-synthesis",
+      title: "Final Synthesis",
+      agent: "Synthesis Lead",
+      task: "Create the final result.",
+      skills: [],
+      dependsOn: [],
+      acceptance: ["Output matches the selected format."],
+      mode: "synthesis",
+      requiresReview: false,
+      sandbox: "workspace-write",
+      networkPolicy: "confirm",
+      reasoningEffort: "medium",
+      outputRequirement: {
+        type: "ppt",
+        custom: "输出中文Markdown深度研究报告，适合直接给研发、战略或供应链团队评审。"
+      }
+    }
+  );
+
+  assert.match(prompt, /Required final output type: PPT \/ presentation deck \(ppt\)/);
+  assert.match(prompt, /selected output type above is authoritative/);
+  assert.match(prompt, /Do not deliver only a Markdown report when PPT is selected/);
+  assert.match(prompt, /输出中文PPT 汇报材料/);
+  assert.doesNotMatch(prompt, /User-supplied output requirement: 输出中文Markdown深度研究报告/);
+});
+
 test("RunManager includes auto-review policy and JSON contract in prompts", () => {
   const manager = new RunManager({ root: process.cwd() });
   const prompt = manager.nodePrompt(

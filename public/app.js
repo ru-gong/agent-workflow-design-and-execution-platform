@@ -1,3 +1,11 @@
+import {
+  OUTPUT_REQUIREMENT_OPTIONS,
+  customForOutputRequirementTypeChange,
+  defaultOutputRequirement,
+  normalizeOutputRequirement,
+  outputRequirementGuidance
+} from "./outputRequirement.js";
+
 const $ = (id) => document.getElementById(id);
 
 const icons = {
@@ -39,17 +47,6 @@ const TOOL_PROVIDERS = {
 const CODEX_EFFORT_LEVELS = ["low", "medium", "high", "xhigh"];
 const CLAUDE_SONNET_EFFORT_LEVELS = ["low", "medium", "high", "max"];
 const CLAUDE_OPUS_47_EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"];
-const OUTPUT_REQUIREMENT_OPTIONS = [
-  ["ppt", "PPT / Presentation"],
-  ["html", "HTML / Web Page"],
-  ["markdown", "MD 文档 / Markdown"],
-  ["spreadsheet", "表格 / Spreadsheet"],
-  ["image", "图片 / Image"],
-  ["pdf", "PDF / PDF"],
-  ["docx", "Word 文档 / DOCX"],
-  ["other", "其他 / Other"]
-];
-
 const state = {
   plan: null,
   skills: [],
@@ -233,43 +230,6 @@ function selectedExecutorModel() {
 
 function effectiveNodeModel(node) {
   return node?.model || selectedExecutorModel();
-}
-
-function defaultOutputRequirement() {
-  return { type: "markdown", custom: "" };
-}
-
-function normalizeOutputRequirement(value = {}) {
-  const aliases = {
-    ppt: "ppt",
-    powerpoint: "ppt",
-    slides: "ppt",
-    deck: "ppt",
-    html: "html",
-    webpage: "html",
-    web: "html",
-    md: "markdown",
-    markdown: "markdown",
-    document: "markdown",
-    doc: "markdown",
-    table: "spreadsheet",
-    spreadsheet: "spreadsheet",
-    xlsx: "spreadsheet",
-    csv: "spreadsheet",
-    image: "image",
-    picture: "image",
-    png: "image",
-    pdf: "pdf",
-    word: "docx",
-    docx: "docx",
-    other: "other"
-  };
-  const rawType = typeof value === "string" ? value : value?.type;
-  const type = aliases[String(rawType || "").trim().toLowerCase()] || "markdown";
-  return {
-    type,
-    custom: String(typeof value === "object" && value ? value.custom || "" : "").slice(0, 600)
-  };
 }
 
 function ensureOutputRequirement(node) {
@@ -1477,13 +1437,14 @@ function modelOptionsMarkup(value) {
 function outputRequirementMarkup(node) {
   if (node.mode !== "synthesis") return "";
   const requirement = ensureOutputRequirement(node);
+  const placeholder = outputRequirementGuidance(requirement.type);
   return `
     <div class="form-field output-requirement">
       <label for="outputRequirementType">输出物要求</label>
       <select id="outputRequirementType">
         ${outputRequirementOptionsMarkup(requirement.type)}
       </select>
-      <textarea id="outputRequirementCustom" placeholder="人工补充输出格式、结构、受众、文件命名或交付细节。">${escapeHtml(requirement.custom)}</textarea>
+      <textarea id="outputRequirementCustom" placeholder="${escapeAttr(placeholder)}">${escapeHtml(requirement.custom)}</textarea>
     </div>
   `;
 }
@@ -1501,10 +1462,16 @@ function bindOutputRequirement(node) {
   const requirement = ensureOutputRequirement(node);
   typeSelect.value = requirement.type;
   typeSelect.addEventListener("change", (event) => {
+    const previousRequirement = ensureOutputRequirement(node);
+    const nextType = normalizeOutputRequirement(event.target.value).type;
+    const nextCustom = customForOutputRequirementTypeChange(previousRequirement, nextType);
     node.outputRequirement = {
-      ...ensureOutputRequirement(node),
-      type: normalizeOutputRequirement(event.target.value).type
+      ...previousRequirement,
+      type: nextType,
+      custom: nextCustom
     };
+    customInput.value = nextCustom;
+    customInput.placeholder = outputRequirementGuidance(nextType);
     if (node.outputRequirement.type !== "markdown" && (node.sandbox || "workspace-write") === "read-only") {
       node.sandbox = "workspace-write";
       if ($("nodeSandbox")) $("nodeSandbox").value = node.sandbox;
