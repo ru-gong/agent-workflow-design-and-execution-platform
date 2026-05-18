@@ -28,6 +28,14 @@ USE_MOCK_CODEX=1 npm start
 npm test
 ```
 
+## Latest Updates - 2026-05-19
+
+- Conversation title and artifact note: each generated workflow derives a visible conversation name that users can edit at the top of the canvas. The artifact folder now includes `对话命名.md`, which records the current title, original goal, session path, and artifact path, and is updated after user renaming.
+- Artifact quick actions: process artifacts and final deliverables can be opened directly from the UI, including one-click access to their containing folders.
+- Larger execution console: the bottom command/log panel has been expanded so users can see more Codex or Claude Code stdout, stderr, and run events while execution is in progress.
+- Output requirement fix: when a synthesis node selects PPT, HTML, spreadsheets, images, PDF, Word documents, or another deliverable type, both the frontend guidance and backend execution prompt now treat that selected type as authoritative instead of being overridden by stale Markdown default wording.
+- Windows compatibility: path configuration preserves `C:\...` drive prefixes, and native folder picking plus local CLI startup now handle macOS and Windows more reliably.
+
 ## What It Does
 
 - `GET /api/health`: detects locally available coding tools. Codex and Claude Code are currently supported.

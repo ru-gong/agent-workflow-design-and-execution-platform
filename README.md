@@ -30,6 +30,14 @@ USE_MOCK_CODEX=1 npm start
 npm test
 ```
 
+## 2026-05-19 更新
+
+- 会话命名与产物记录：生成编排时自动归纳对话名称，用户可在画布顶部直接修改；产物目录会生成 `对话命名.md`，记录当前对话名称、原始需求、会话路径和产物路径，并在用户更名后同步更新。
+- 产物快捷操作：过程产物和结果产物支持在页面内一键打开，也支持一键打开所在文件夹。
+- 执行窗口优化：底部命令提示符/运行日志窗口已放大，便于查看 Codex 或 Claude Code 的 stdout、stderr 和执行事件。
+- 输出物要求修复：结果汇总节点选择 PPT、HTML、表格、图片、PDF、Word 文档等类型时，前端提示词和后端执行 prompt 都会以用户选中的输出类型为准，不再被残留的 Markdown 默认文案覆盖。
+- Windows 兼容性：路径配置保留 `C:\...` 盘符，原生文件夹选择和本机 CLI 启动路径做了 macOS/Windows 兼容处理。
+
 ## Development History
 
 历史开发脉络见 [`DEVELOPMENT_HISTORY.md`](./DEVELOPMENT_HISTORY.md)。Git 操作规则保存在本地 `GIT_WORKFLOW_RULES.md`，该文件按项目约定不纳入仓库。
