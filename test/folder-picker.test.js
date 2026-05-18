@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { buildChooseFolderScript, pickFolder, resolvePickerDefaultPath } from "../server/folderPicker.js";
+import { buildChooseFolderScript, buildWindowsChooseFolderArgs, pickFolder, resolvePickerDefaultPath } from "../server/folderPicker.js";
 
 test("buildChooseFolderScript escapes prompt and default path for AppleScript", () => {
   const script = buildChooseFolderScript({
@@ -40,6 +40,28 @@ test("pickFolder returns selected folder and handles cancel", async () => {
     }
   });
   assert.deepEqual(cancelled, { supported: true, cancelled: true });
+});
+
+test("pickFolder supports Windows folder picker through PowerShell", async () => {
+  const args = buildWindowsChooseFolderArgs({
+    title: "选择产物目录",
+    defaultPath: "C:\\Users\\demo"
+  });
+  assert.equal(args[0], "-NoProfile");
+  assert.equal(args.includes("-STA"), true);
+  assert.equal(args.at(-2), "选择产物目录");
+  assert.equal(args.at(-1), "C:\\Users\\demo");
+
+  const success = await pickFolder({
+    platform: "win32",
+    currentPath: "/tmp",
+    execFileImpl: (command, commandArgs, _options, callback) => {
+      assert.equal(command, "powershell.exe");
+      assert.equal(commandArgs.includes("-STA"), true);
+      callback(null, "C:\\Users\\demo\\selected\r\n", "");
+    }
+  });
+  assert.deepEqual(success, { supported: true, path: "C:\\Users\\demo\\selected" });
 });
 
 test("pickFolder reports unsupported platforms without invoking osascript", async () => {

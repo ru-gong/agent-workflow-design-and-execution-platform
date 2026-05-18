@@ -11,15 +11,14 @@ export async function pickFolder({
   execFileImpl = execFile,
   platform = process.platform
 } = {}) {
-  if (platform !== "darwin") {
-    return { supported: false, error: "Folder picker is currently implemented for macOS." };
+  const defaultPath = await resolvePickerDefaultPath({ currentPath, fallbackPath, root });
+  const command = buildChooseFolderCommand({ title, defaultPath, platform });
+  if (!command) {
+    return { supported: false, error: "Folder picker is currently implemented for macOS and Windows." };
   }
 
-  const defaultPath = await resolvePickerDefaultPath({ currentPath, fallbackPath, root });
-  const script = buildChooseFolderScript({ title, defaultPath });
-
   try {
-    const { stdout } = await execFilePromise(execFileImpl, "osascript", ["-e", script], { timeout: 120_000 });
+    const { stdout } = await execFilePromise(execFileImpl, command.command, command.args, { timeout: 120_000 });
     const selectedPath = String(stdout || "").trim();
     return selectedPath ? { supported: true, path: selectedPath } : { supported: true, cancelled: true };
   } catch (error) {
@@ -56,6 +55,28 @@ export function buildChooseFolderScript({ title = "选择文件夹", defaultPath
     `set pickedFolder to choose folder with prompt ${appleScriptString(title)} default location defaultFolder`,
     "POSIX path of pickedFolder"
   ].join("\n");
+}
+
+export function buildWindowsChooseFolderArgs({ title = "选择文件夹", defaultPath = ROOT } = {}) {
+  const script = [
+    "Add-Type -AssemblyName System.Windows.Forms",
+    "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog",
+    "$dialog.Description = $args[0]",
+    "$dialog.SelectedPath = $args[1]",
+    "$dialog.ShowNewFolderButton = $true",
+    "if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $dialog.SelectedPath }"
+  ].join("; ");
+  return ["-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-Command", script, title, defaultPath];
+}
+
+function buildChooseFolderCommand({ title, defaultPath, platform }) {
+  if (platform === "darwin") {
+    return { command: "osascript", args: ["-e", buildChooseFolderScript({ title, defaultPath })] };
+  }
+  if (platform === "win32") {
+    return { command: "powershell.exe", args: buildWindowsChooseFolderArgs({ title, defaultPath }) };
+  }
+  return null;
 }
 
 function resolveCandidatePath(value, root) {

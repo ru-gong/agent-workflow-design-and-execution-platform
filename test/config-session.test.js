@@ -4,7 +4,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { normalizeConfig, resolveRuntimeConfig } from "../server/config.js";
-import { createSession, getSessionManifest, saveCurrentPlan } from "../server/sessionStore.js";
+import { createSession, getSessionManifest, saveCurrentPlan, summarizeSessionTitle, updateSessionTitle } from "../server/sessionStore.js";
 
 test("resolveRuntimeConfig anchors storage and artifacts under workspace root", () => {
   const runtime = resolveRuntimeConfig(
@@ -37,6 +37,18 @@ test("normalizeConfig falls back to safe model and reasoning defaults", () => {
   assert.equal(config.models.executor, "gpt-5.3-codex");
   assert.equal(config.models.reasoningEffort, "medium");
   assert.equal(config.codex.adapter, "cli");
+});
+
+test("normalizeConfig preserves Windows drive paths", () => {
+  const config = normalizeConfig({
+    workspaceRoot: "C:\\Users\\demo\\project",
+    storageRoot: "D:\\agent-runs",
+    artifactRoot: "E:\\deliverables"
+  });
+
+  assert.equal(config.workspaceRoot, "C:\\Users\\demo\\project");
+  assert.equal(config.storageRoot, "D:\\agent-runs");
+  assert.equal(config.artifactRoot, "E:\\deliverables");
 });
 
 test("normalizeConfig uses Claude defaults when Claude Code is selected", () => {
@@ -73,6 +85,7 @@ test("createSession persists conversation, plans, and artifact manifest", async 
 
   const session = await createSession({ goal: "build demo", plan, source: "test", runtime });
   assert.match(session.id, /^session-/);
+  assert.equal(session.title, "build demo");
   assert.equal(JSON.parse(await fs.readFile(path.join(session.paths.artifactDir, "manifest.json"), "utf8")).sessionId, session.id);
   assert.equal(JSON.parse(await fs.readFile(path.join(session.paths.sessionDir, "plan.json"), "utf8")).name, "Demo");
 
@@ -97,4 +110,14 @@ test("createSession persists conversation, plans, and artifact manifest", async 
   const loadedManifest = await getSessionManifest(session.id, runtime);
   assert.equal(loadedManifest.manifest.artifacts[0].title, "Demo Report");
   assert.equal(loadedManifest.paths.manifestPath, manifestPath);
+
+  const renamed = await updateSessionTitle(session.id, "自定义对话名称", { runtime });
+  assert.equal(renamed.title, "自定义对话名称");
+  const renamedMetadata = JSON.parse(await fs.readFile(path.join(session.paths.sessionDir, "metadata.json"), "utf8"));
+  assert.equal(renamedMetadata.title, "自定义对话名称");
+});
+
+test("summarizeSessionTitle derives concise names from user goals", () => {
+  assert.equal(summarizeSessionTitle("请对当前行业中铝和钛粉末冶金的应用情况做深度调研，然后输出报告"), "对当前行业中铝和钛粉末冶金的应用情况做深度调研");
+  assert.equal(summarizeSessionTitle("", "Fallback Plan"), "Fallback Plan");
 });

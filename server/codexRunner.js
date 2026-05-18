@@ -104,7 +104,7 @@ export async function detectProgrammingTools({ runner = spawn } = {}) {
 
 export function commandExists(command, runner = spawn) {
   return new Promise((resolve) => {
-    const child = runner(command, ["--version"], { stdio: ["ignore", "pipe", "pipe"] });
+    const child = runner(command, ["--version"], spawnOptions({ stdio: ["ignore", "pipe", "pipe"] }));
     let output = "";
     child.stdout?.on("data", (chunk) => {
       output += chunk.toString();
@@ -154,11 +154,11 @@ export async function runAgentExec({
 
   return new Promise((resolve, reject) => {
     const startedAt = Date.now();
-    const child = spawn(tool.command, args, {
+    const child = spawn(tool.command, args, spawnOptions({
       cwd,
       env: { ...env, NO_COLOR: "1" },
       stdio: ["pipe", "pipe", "pipe"]
-    });
+    }));
     let stdout = "";
     let stderr = "";
     let settled = false;
@@ -281,6 +281,11 @@ export async function runAgentExec({
 
     child.stdin.end(prompt);
   });
+}
+
+function spawnOptions(options) {
+  if (process.platform !== "win32") return options;
+  return { ...options, shell: true, windowsHide: true };
 }
 
 export async function runCodexExec(options) {
