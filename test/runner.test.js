@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { RunManager } from "../server/runner.js";
+import { promises as fs } from "node:fs";
+import path from "node:path";
+import { RunManager, normalizeRunOptions } from "../server/runner.js";
 
 function waitFor(run, predicate, timeoutMs = 2000) {
   return new Promise((resolve, reject) => {
@@ -706,4 +708,106 @@ test("RunManager carries selected programming tool into runs and prompts", async
   });
   assert.match(prompt, /visual Claude Code agent orchestration workflow/);
   manager.stop(run.id);
+});
+
+test("normalizeRunOptions clamps governance controls", () => {
+  const options = normalizeRunOptions({
+    maxConcurrency: 99,
+    networkPolicy: "full-access",
+    pauseOnFailure: false,
+    nodeTimeoutSeconds: -5,
+    runTimeoutSeconds: 999999999,
+    tokenBudget: "1200"
+  }, { nodes: [{ id: "n1" }] });
+
+  assert.equal(options.maxConcurrency, 8);
+  assert.equal(options.networkPolicy, "full-access");
+  assert.equal(options.pauseOnFailure, false);
+  assert.equal(options.nodeTimeoutSeconds, 0);
+  assert.equal(options.runTimeoutSeconds, 604800);
+  assert.equal(options.tokenBudget, 1200);
+  assert.equal(options.estimatedNodeCount, 1);
+});
+
+test("RunManager writes checkpoints and can rerun a node with downstream nodes", async () => {
+  class RerunManager extends RunManager {
+    constructor(options) {
+      super(options);
+      this.calls = [];
+    }
+
+    async runCodexNode(run, node) {
+      this.calls.push(node.id);
+      return { finalMessage: `${node.id} attempt ${this.calls.filter((id) => id === node.id).length}`, stdout: "", durationMs: 5 };
+    }
+  }
+
+  const manager = new RerunManager({ root: process.cwd() });
+  const snapshot = await manager.start({
+    goal: "checkpoint rerun test",
+    runOptions: { maxConcurrency: 1 },
+    plan: {
+      version: "1.0",
+      name: "Rerun Flow",
+      summary: "Rerun node and downstream.",
+      maxConcurrency: 1,
+      nodes: [
+        { id: "a", title: "A", agent: "A", task: "Do A.", skills: [], dependsOn: [], acceptance: ["ok"], mode: "codex", requiresReview: false, sandbox: "workspace-write", networkPolicy: "confirm", x: 0, y: 0 },
+        { id: "b", title: "B", agent: "B", task: "Do B.", skills: [], dependsOn: ["a"], acceptance: ["ok"], mode: "codex", requiresReview: false, sandbox: "workspace-write", networkPolicy: "confirm", x: 0, y: 0 }
+      ],
+      edges: []
+    }
+  });
+
+  const run = manager.get(snapshot.id);
+  await waitFor(run, () => run.status === "completed", 3000);
+  assert.equal(JSON.parse(await fs.readFile(path.join(run.runDir, "checkpoint.json"), "utf8")).status, "completed");
+
+  const result = manager.rerunNode(run.id, "a", { downstream: true });
+  assert.equal(result.ok, true);
+  await waitFor(run, () => run.status === "completed" && run.nodes.a.output.includes("attempt 2"), 3000);
+
+  assert.deepEqual(manager.calls, ["a", "b", "final-synthesis", "a", "b", "final-synthesis"]);
+  assert.equal(run.nodes.b.output, "b attempt 2");
+});
+
+test("RunManager pauses on failure and rerun recovers the workflow", async () => {
+  class FailingOnceManager extends RunManager {
+    constructor(options) {
+      super(options);
+      this.calls = 0;
+    }
+
+    async runCodexNode() {
+      this.calls += 1;
+      if (this.calls === 1) throw new Error("planned failure");
+      return { finalMessage: "recovered", stdout: "", durationMs: 5 };
+    }
+  }
+
+  const manager = new FailingOnceManager({ root: process.cwd() });
+  const snapshot = await manager.start({
+    goal: "failure pause test",
+    runOptions: { pauseOnFailure: true },
+    plan: {
+      version: "1.0",
+      name: "Failure Flow",
+      summary: "Pause and recover.",
+      maxConcurrency: 1,
+      nodes: [
+        { id: "work", title: "Work", agent: "Worker", task: "Do work.", skills: [], dependsOn: [], acceptance: ["ok"], mode: "codex", requiresReview: false, sandbox: "workspace-write", networkPolicy: "confirm", x: 0, y: 0 }
+      ],
+      edges: []
+    }
+  });
+
+  const run = manager.get(snapshot.id);
+  await waitFor(run, () => run.status === "paused", 3000);
+  assert.equal(run.pauseReason, "failure");
+  assert.match(run.nodes.work.error, /planned failure/);
+
+  const rerun = manager.rerunNode(run.id, "work");
+  assert.equal(rerun.ok, true);
+  await waitFor(run, () => run.status === "completed", 3000);
+  assert.equal(run.nodes.work.output, "recovered");
 });

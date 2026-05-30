@@ -36,6 +36,13 @@ npm test
 - Output requirement fix: when a synthesis node selects PPT, HTML, spreadsheets, images, PDF, Word documents, or another deliverable type, both the frontend guidance and backend execution prompt now treat that selected type as authoritative instead of being overridden by stale Markdown default wording.
 - Windows compatibility: path configuration preserves `C:\...` drive prefixes, and native folder picking plus local CLI startup now handle macOS and Windows more reliably.
 
+## Latest Updates - 2026-05-30
+
+- Execution preview: clicking "Confirm execution" now opens a preflight dialog showing node count, concurrency, human checkpoints, auto-review nodes, network access, and estimated token usage. Users can adjust max concurrency, network policy, timeouts, token budget, failure pausing, and resume behavior before starting.
+- Run governance: the runner writes `checkpoint.json` and `run-options.json`, supports budget/timeout pauses, failure pauses, resume, rerun node, and rerun node with downstream nodes.
+- Layered run view: the bottom execution panel now has Overview, Node Detail, and Logs views. Overview shows status and budget, while Node Detail exposes task parameters, output summary, prompt/output quick open actions, and rerun controls.
+- Workflow templates: the left panel now includes a template library. Users can create a workflow from built-in templates, save the current canvas as a template, export template JSON, and import template JSON. Built-ins include deep industry research, codebase audit, PR/change review, sources-to-PPT, and multi-source fact checking.
+
 ## What It Does
 
 - `GET /api/health`: detects locally available coding tools. Codex and Claude Code are currently supported.
@@ -47,7 +54,10 @@ npm test
 - `POST /api/runs`: creates a run and schedules nodes according to DAG dependencies.
 - `GET /api/runs/:id/events`: streams node status, logs, and final results through SSE.
 - `POST /api/runs/:id/nodes/:nodeId/continue`: resumes a paused human review node or a node waiting for network permission.
+- `POST /api/runs/:id/resume`: resumes a run paused by budget, timeout, or failure governance.
+- `POST /api/runs/:id/nodes/:nodeId/rerun`: reruns one node, optionally including downstream nodes.
 - `POST /api/runs/:id/stop`: stops a run and cancels active tool subprocesses.
+- `GET /api/templates` / `POST /api/templates` / `GET /api/templates/:id` / `DELETE /api/templates/:id`: manages reusable workflow templates.
 - `GET /api/weather?city=...`: sample generated artifact backend proxy using Open-Meteo. No API key is required.
 
 ## Design Notes

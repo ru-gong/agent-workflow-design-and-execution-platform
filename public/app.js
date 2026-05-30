@@ -61,6 +61,13 @@ const state = {
   reviewManifestSessionId: "",
   reviewManifestError: "",
   eventSource: null,
+  runDialogOpen: false,
+  runOptionsDraft: null,
+  runPanelTab: "overview",
+  activeRunNodeId: "",
+  templates: [],
+  selectedTemplateId: "",
+  templateStatus: "",
   drag: null,
   pan: null,
   selection: null,
@@ -88,6 +95,15 @@ const CANVAS_ZOOM_MIN = 0.4;
 const CANVAS_ZOOM_MAX = 1.5;
 const CANVAS_ZOOM_STEP = 0.1;
 const MAX_UNDO_STEPS = 80;
+const DEFAULT_RUN_OPTIONS = {
+  maxConcurrency: 2,
+  networkPolicy: "plan",
+  skipCompleted: false,
+  pauseOnFailure: true,
+  nodeTimeoutSeconds: 0,
+  runTimeoutSeconds: 0,
+  tokenBudget: 0
+};
 
 function svg(path) {
   return `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${path}"/></svg>`;
@@ -268,6 +284,32 @@ function ensureReviewPolicy(node) {
   return node.reviewPolicy;
 }
 
+function defaultRunOptionsFromPlan(plan = state.plan) {
+  return {
+    ...DEFAULT_RUN_OPTIONS,
+    maxConcurrency: Math.min(Math.max(Number(plan?.maxConcurrency || DEFAULT_RUN_OPTIONS.maxConcurrency), 1), 8)
+  };
+}
+
+function normalizeRunOptions(value = {}) {
+  const source = value && typeof value === "object" ? value : {};
+  return {
+    maxConcurrency: clampNumber(source.maxConcurrency, DEFAULT_RUN_OPTIONS.maxConcurrency, 1, 8),
+    networkPolicy: ["plan", "confirm", "full-access"].includes(source.networkPolicy) ? source.networkPolicy : DEFAULT_RUN_OPTIONS.networkPolicy,
+    skipCompleted: Boolean(source.skipCompleted),
+    pauseOnFailure: source.pauseOnFailure === undefined ? true : Boolean(source.pauseOnFailure),
+    nodeTimeoutSeconds: clampNumber(source.nodeTimeoutSeconds, 0, 0, 86400),
+    runTimeoutSeconds: clampNumber(source.runTimeoutSeconds, 0, 0, 604800),
+    tokenBudget: clampNumber(source.tokenBudget, 0, 0, 100000000)
+  };
+}
+
+function clampNumber(value, fallback, min, max) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(Math.max(parsed, min), max);
+}
+
 function syncTopLevelEffortControls() {
   const provider = currentToolProvider();
   const defaultEffort = state.config?.models?.reasoningEffort || "medium";
@@ -295,6 +337,7 @@ function initButtons() {
   $("zoomInBtn").innerHTML = icons.zoomIn;
   $("fitCanvasBtn").innerHTML = icons.fit;
   $("closeReviewBtn").innerHTML = icons.close;
+  $("closeRunConfirmBtn").innerHTML = icons.close;
   $("saveConversationTitleBtn").textContent = "保存";
 }
 
@@ -535,6 +578,134 @@ async function loadSkills(provider = currentToolProvider()) {
   }
 }
 
+async function loadTemplates() {
+  const button = $("refreshTemplatesBtn");
+  button?.classList.add("spin");
+  try {
+    const data = await api("/api/templates");
+    state.templates = data.templates || [];
+    if (!state.selectedTemplateId && state.templates.length) state.selectedTemplateId = state.templates[0].id;
+    state.templateStatus = `已加载 ${state.templates.length} 个模板`;
+  } catch (error) {
+    state.templates = [];
+    state.templateStatus = `模板加载失败：${error.message}`;
+  } finally {
+    button?.classList.remove("spin");
+    renderTemplates();
+  }
+}
+
+function renderTemplates() {
+  const select = $("templateSelect");
+  const status = $("templateStatus");
+  if (!select || !status) return;
+  select.innerHTML = [
+    '<option value="">选择模板</option>',
+    ...state.templates.map((template) => `<option value="${escapeAttr(template.id)}">${escapeHtml(template.builtIn ? `内置 · ${template.name}` : template.name)}</option>`)
+  ].join("");
+  select.value = state.selectedTemplateId || "";
+  const selected = state.templates.find((template) => template.id === select.value);
+  status.textContent = selected
+    ? `${selected.description || selected.goalHint || "可从该模板创建工作流。"}`
+    : (state.templateStatus || "模板未加载");
+  $("loadTemplateBtn").disabled = !selected;
+  $("exportTemplateBtn").disabled = !selected;
+  $("saveTemplateBtn").disabled = !state.plan;
+}
+
+async function loadSelectedTemplate() {
+  const id = $("templateSelect")?.value || "";
+  if (!id) return;
+  try {
+    const data = await api(`/api/templates/${encodeURIComponent(id)}`);
+    const template = data.template;
+    if (!template?.plan?.nodes?.length) throw new Error("模板没有可用节点。");
+    state.plan = structuredClone(template.plan);
+    state.session = null;
+    state.run = null;
+    state.logs = [];
+    state.nodeActivity = {};
+    state.reviewDialog = null;
+    state.selectedNodeId = state.plan.nodes[0]?.id || "";
+    state.selectedNodeIds = new Set(state.selectedNodeId ? [state.selectedNodeId] : []);
+    state.runOptionsDraft = normalizeRunOptions(template.runOptions || defaultRunOptionsFromPlan(state.plan));
+    if (!$("goalInput").value.trim() && template.goalHint) $("goalInput").value = template.goalHint;
+    resetPlanHistory();
+    autoLayout(false);
+    showNotice(`已从模板创建工作流：${template.name}`);
+    renderAll();
+    requestAnimationFrame(fitCanvasToView);
+  } catch (error) {
+    showNotice(error.message || "模板加载失败", "bad");
+  }
+}
+
+async function saveCurrentTemplate() {
+  if (!state.plan) return;
+  syncEdgesFromDependencies();
+  const name = window.prompt("模板名称", state.plan.name || "新工作流模板");
+  if (!name) return;
+  try {
+    const data = await api("/api/templates", {
+      method: "POST",
+      body: JSON.stringify({
+        name,
+        description: state.plan.summary || "",
+        goalHint: $("goalInput").value.trim(),
+        plan: state.plan,
+        runOptions: state.runOptionsDraft || defaultRunOptionsFromPlan()
+      })
+    });
+    state.selectedTemplateId = data.template?.id || "";
+    await loadTemplates();
+    showNotice(`模板已保存：${data.template?.name || name}`);
+  } catch (error) {
+    showNotice(error.message || "模板保存失败", "bad");
+  }
+}
+
+async function exportSelectedTemplate() {
+  const id = $("templateSelect")?.value || "";
+  if (!id) return;
+  try {
+    const data = await api(`/api/templates/${encodeURIComponent(id)}`);
+    const blob = new Blob([`${JSON.stringify(data.template, null, 2)}\n`], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${data.template.id || "workflow-template"}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    showNotice(error.message || "模板导出失败", "bad");
+  }
+}
+
+async function importTemplateFile(file) {
+  if (!file) return;
+  try {
+    const template = JSON.parse(await file.text());
+    if (!template.plan?.nodes?.length) throw new Error("JSON 中没有可导入的 plan.nodes。");
+    const data = await api("/api/templates", {
+      method: "POST",
+      body: JSON.stringify({
+        name: template.name || "导入模板",
+        description: template.description || "",
+        goalHint: template.goalHint || "",
+        plan: template.plan,
+        runOptions: template.runOptions || {}
+      })
+    });
+    state.selectedTemplateId = data.template?.id || "";
+    await loadTemplates();
+    showNotice(`模板已导入：${data.template?.name || "导入模板"}`);
+  } catch (error) {
+    showNotice(error.message || "模板导入失败", "bad");
+  } finally {
+    $("templateImportInput").value = "";
+  }
+}
+
 function loadSample() {
   $("goalInput").value = "请做一个天气查询网页";
   $("modelInput").value = defaultPlannerModel(currentToolProvider());
@@ -624,9 +795,11 @@ function renderAll() {
   renderCanvas();
   renderInspector();
   renderSkills();
+  renderTemplates();
   ensureArtifactManifestLoaded();
   renderRun();
   renderReviewDialog();
+  renderRunConfirmDialog();
   renderUndoControls();
   queueActivityVisibilityCheck();
 }
@@ -2023,7 +2196,98 @@ function uniqueNodeId(base) {
 
 async function startRun() {
   if (!state.plan) return;
+  state.runDialogOpen = true;
+  state.runOptionsDraft = normalizeRunOptions(state.runOptionsDraft || defaultRunOptionsFromPlan());
+  renderRunConfirmDialog();
+}
+
+function closeRunConfirmDialog() {
+  state.runDialogOpen = false;
+  renderRunConfirmDialog();
+}
+
+function readRunOptionsDraftFromDialog() {
+  return normalizeRunOptions({
+    maxConcurrency: $("runMaxConcurrencyInput")?.value,
+    networkPolicy: $("runNetworkPolicyInput")?.value,
+    skipCompleted: $("runSkipCompletedInput")?.checked,
+    pauseOnFailure: $("runPauseOnFailureInput")?.checked,
+    nodeTimeoutSeconds: $("runNodeTimeoutInput")?.value,
+    runTimeoutSeconds: $("runTimeoutInput")?.value,
+    tokenBudget: $("runTokenBudgetInput")?.value
+  });
+}
+
+function updateRunOptionsDraftFromDialog() {
+  state.runOptionsDraft = readRunOptionsDraftFromDialog();
+  renderRunPreviewSummary();
+}
+
+function renderRunConfirmDialog() {
+  const modal = $("runConfirmModal");
+  if (!modal) return;
+  modal.classList.toggle("hidden", !state.runDialogOpen);
+  if (!state.runDialogOpen) return;
+  state.runOptionsDraft = normalizeRunOptions(state.runOptionsDraft || defaultRunOptionsFromPlan());
+  $("runMaxConcurrencyInput").value = state.runOptionsDraft.maxConcurrency;
+  $("runNetworkPolicyInput").value = state.runOptionsDraft.networkPolicy;
+  $("runSkipCompletedInput").checked = state.runOptionsDraft.skipCompleted;
+  $("runPauseOnFailureInput").checked = state.runOptionsDraft.pauseOnFailure;
+  $("runNodeTimeoutInput").value = state.runOptionsDraft.nodeTimeoutSeconds;
+  $("runTimeoutInput").value = state.runOptionsDraft.runTimeoutSeconds;
+  $("runTokenBudgetInput").value = state.runOptionsDraft.tokenBudget;
+  renderRunPreviewSummary();
+}
+
+function renderRunPreviewSummary() {
+  const summary = $("runPreviewSummary");
+  const nodesBox = $("runPreviewNodes");
+  if (!summary || !nodesBox || !state.plan) return;
+  const options = state.runOptionsDraft || defaultRunOptionsFromPlan();
+  const nodes = state.plan.nodes || [];
+  const counts = {
+    total: nodes.length,
+    human: nodes.filter((node) => node.mode === "human-review" || node.requiresReview).length,
+    autoReview: nodes.filter((node) => node.mode === "auto-review").length,
+    network: nodes.filter((node) => (node.networkPolicy || "confirm") === "full-access").length,
+    writable: nodes.filter((node) => (node.sandbox || "workspace-write") === "workspace-write").length,
+    synthesis: nodes.filter((node) => node.mode === "synthesis").length
+  };
+  const estimatedTokens = estimatePlanTokens(state.plan);
+  summary.innerHTML = `
+    <div class="run-preview-card"><span>节点</span><strong>${counts.total}</strong></div>
+    <div class="run-preview-card"><span>最大并发</span><strong>${options.maxConcurrency}</strong></div>
+    <div class="run-preview-card"><span>人工确认</span><strong>${counts.human}</strong></div>
+    <div class="run-preview-card"><span>自动评审</span><strong>${counts.autoReview}</strong></div>
+    <div class="run-preview-card"><span>联网节点</span><strong>${options.networkPolicy === "full-access" ? "全部执行节点" : counts.network}</strong></div>
+    <div class="run-preview-card"><span>预计 token</span><strong>${estimatedTokens}</strong></div>
+  `;
+  nodesBox.innerHTML = nodes.map((node) => `
+    <article class="run-preview-node">
+      <div>
+        <strong>${escapeHtml(node.title || node.id)}</strong>
+        <span>${escapeHtml(node.id)} · ${escapeHtml(modeDisplayLabel(node.mode))} · ${escapeHtml(node.reasoningEffort || "auto")}</span>
+      </div>
+      <div class="run-preview-badges">
+        <span>${escapeHtml(node.sandbox || "workspace-write")}</span>
+        <span>${escapeHtml(options.networkPolicy === "plan" ? (node.networkPolicy || "confirm") : options.networkPolicy)}</span>
+        ${node.mode === "synthesis" ? `<span>${escapeHtml(normalizeOutputRequirement(node.outputRequirement).type)}</span>` : ""}
+      </div>
+    </article>
+  `).join("");
+}
+
+function estimatePlanTokens(plan) {
+  const text = JSON.stringify(plan || {});
+  return Math.max(1, Math.ceil(text.length / 4));
+}
+
+async function startRunConfirmed() {
+  if (!state.plan) return;
+  state.runOptionsDraft = readRunOptionsDraftFromDialog();
+  state.runDialogOpen = false;
   setBusy($("runBtn"), true, `${icons.refresh}<span>启动中</span>`);
+  setBusy($("executeRunBtn"), true, `${icons.refresh}<span>启动中</span>`);
   state.logs = [];
   state.nodeActivity = {};
   state.reviewDialog = null;
@@ -2036,10 +2300,18 @@ async function startRun() {
     await saveSessionPlan("run:plan-snapshot");
     const data = await api("/api/runs", {
       method: "POST",
-      body: JSON.stringify({ goal: $("goalInput").value.trim(), plan: state.plan, sessionId: state.session?.id || "", toolProvider: currentToolProvider() })
+      body: JSON.stringify({
+        goal: $("goalInput").value.trim(),
+        plan: state.plan,
+        sessionId: state.session?.id || "",
+        toolProvider: currentToolProvider(),
+        runOptions: state.runOptionsDraft
+      })
     });
     state.session = data.session || state.session;
     state.run = data;
+    state.activeRunNodeId = firstInterestingRunNodeId();
+    state.runPanelTab = "overview";
     connectRunEvents(data.id);
     renderAll();
   } catch (error) {
@@ -2047,6 +2319,7 @@ async function startRun() {
     renderRun();
   } finally {
     setBusy($("runBtn"), false, `${icons.play}<span>确认执行</span>`);
+    setBusy($("executeRunBtn"), false, "确认执行");
   }
 }
 
@@ -2079,7 +2352,7 @@ function connectRunEvents(runId) {
     trimLogs();
     renderAll();
   };
-  for (const name of ["snapshot", "run:started", "run:error", "run:finished", "run:cancelled", "node:started", "node:waiting", "node:log", "node:iteration", "node:completed", "node:failed", "node:cancelled"]) {
+  for (const name of ["snapshot", "run:started", "run:error", "run:finished", "run:cancelled", "run:paused", "run:resumed", "node:started", "node:waiting", "node:log", "node:iteration", "node:reset", "node:completed", "node:failed", "node:cancelled"]) {
     state.eventSource.addEventListener(name, handle);
   }
   state.eventSource.onerror = () => {
@@ -2302,6 +2575,16 @@ function patchRunFromEvent(type, data) {
     node.status = "failed";
     node.error = data.error || node.error;
   }
+  if (type === "node:reset") {
+    for (const affectedNodeId of data.affectedNodeIds || [nodeId]) {
+      const affected = state.run.nodes?.[affectedNodeId];
+      if (!affected) continue;
+      affected.status = "pending";
+      affected.waitingReason = "";
+      affected.output = "";
+      affected.error = "";
+    }
+  }
   if (type === "node:cancelled") node.status = "cancelled";
 }
 
@@ -2332,35 +2615,179 @@ function renderRun() {
   const run = state.run;
   const runStatus = $("runStatus");
   if (run) {
-    runStatus.className = `pill ${run.status === "completed" ? "ok" : run.status === "failed" ? "bad" : run.status === "cancelled" ? "warn" : "ok"}`;
+    runStatus.className = `pill ${run.status === "completed" ? "ok" : run.status === "failed" ? "bad" : ["cancelled", "paused"].includes(run.status) ? "warn" : "ok"}`;
     runStatus.textContent = statusLabel(run.status);
-    $("runMeta").textContent = `${run.id} · ${run.startedAt || ""}`;
+    $("runMeta").textContent = `${run.id} · ${run.startedAt || ""}${run.pauseReason ? ` · 暂停：${run.pauseDetail || run.pauseReason}` : ""}`;
   } else {
     runStatus.className = "pill muted";
     runStatus.textContent = "未执行";
     $("runMeta").textContent = "等待确认。";
   }
-  $("stopRunBtn").classList.toggle("hidden", !run || !["running", "waiting"].includes(run.status));
+  $("stopRunBtn").classList.toggle("hidden", !run || !["running", "waiting", "paused"].includes(run.status));
   renderArtifactQuickPanel();
+  renderRunTabs();
 
   const timeline = $("runTimeline");
   timeline.innerHTML = "";
-  for (const node of state.plan?.nodes || []) {
+  for (const node of state.run?.plan?.nodes || state.plan?.nodes || []) {
     const status = nodeState(node.id);
     const item = document.createElement("button");
     item.className = `timeline-item ${status}`;
     item.type = "button";
     item.innerHTML = `<span class="timeline-dot"></span><span class="timeline-label"></span>`;
     item.querySelector(".timeline-label").textContent = node.title;
-    item.disabled = status !== "waiting";
+    item.classList.toggle("active", state.activeRunNodeId === node.id);
+    item.disabled = !run;
     if (status === "waiting") {
       item.title = state.run?.nodes?.[node.id]?.waitingReason === "network" ? "点击确认联网权限" : "点击填写确认意见";
-      item.addEventListener("click", () => openReviewDialog(node.id));
+    } else {
+      item.title = "查看节点详情";
     }
+    item.addEventListener("click", () => {
+      state.activeRunNodeId = node.id;
+      state.runPanelTab = status === "waiting" ? "node" : state.runPanelTab === "logs" ? "logs" : "node";
+      if (status === "waiting") openReviewDialog(node.id);
+      renderRun();
+    });
     timeline.appendChild(item);
   }
+  renderRunDetailPanel();
   $("logOutput").textContent = state.logs.join("\n");
   $("logOutput").scrollTop = $("logOutput").scrollHeight;
+}
+
+function renderRunTabs() {
+  for (const button of document.querySelectorAll(".run-tab")) {
+    button.classList.toggle("active", button.dataset.runTab === state.runPanelTab);
+  }
+  $("runTimeline")?.classList.toggle("hidden", state.runPanelTab === "logs");
+  $("runDetailPanel")?.classList.toggle("hidden", state.runPanelTab === "logs");
+  $("logOutput")?.classList.toggle("compact", state.runPanelTab !== "logs");
+}
+
+function renderRunDetailPanel() {
+  const panel = $("runDetailPanel");
+  if (!panel) return;
+  if (!state.run) {
+    panel.innerHTML = '<div class="run-empty">尚未执行。点击“确认执行”后会先展示预算、权限和阶段预览。</div>';
+    return;
+  }
+  if (state.runPanelTab === "overview") {
+    renderRunOverview(panel);
+    return;
+  }
+  renderRunNodeDetail(panel);
+}
+
+function renderRunOverview(panel) {
+  const run = state.run;
+  const nodes = Object.values(run.nodes || {});
+  const counts = {
+    pending: nodes.filter((node) => node.status === "pending").length,
+    running: nodes.filter((node) => node.status === "running").length,
+    waiting: nodes.filter((node) => node.status === "waiting").length,
+    completed: nodes.filter((node) => node.status === "completed").length,
+    failed: nodes.filter((node) => node.status === "failed").length
+  };
+  const tokenBudget = Number(run.runOptions?.tokenBudget || 0);
+  const tokenText = tokenBudget
+    ? `${run.usage?.estimatedTokens || 0} / ${tokenBudget}`
+    : `${run.usage?.estimatedTokens || 0} 预计`;
+  panel.innerHTML = `
+    <div class="run-overview-grid">
+      <div class="run-metric"><span>状态</span><strong>${escapeHtml(statusLabel(run.status))}</strong></div>
+      <div class="run-metric"><span>完成</span><strong>${counts.completed}/${nodes.length}</strong></div>
+      <div class="run-metric"><span>运行/等待</span><strong>${counts.running}/${counts.waiting}</strong></div>
+      <div class="run-metric"><span>失败</span><strong>${counts.failed}</strong></div>
+      <div class="run-metric"><span>最大并发</span><strong>${run.runOptions?.maxConcurrency || run.plan?.maxConcurrency || 2}</strong></div>
+      <div class="run-metric"><span>Token</span><strong>${escapeHtml(tokenText)}</strong></div>
+    </div>
+    <div class="run-control-row"></div>
+  `;
+  const controls = panel.querySelector(".run-control-row");
+  if (run.status === "paused" && run.pauseReason === "budget") {
+    controls.appendChild(createRunActionButton("放宽预算并继续", () => resumeRun({ tokenBudget: 0, runTimeoutSeconds: 0 })));
+  } else if (run.status === "paused") {
+    const hint = document.createElement("span");
+    hint.className = "run-pause-hint";
+    hint.textContent = run.pauseDetail || "运行已暂停，请查看节点详情后选择重跑。";
+    controls.appendChild(hint);
+  }
+  const failedNode = nodes.find((node) => node.status === "failed");
+  if (failedNode) {
+    controls.appendChild(createRunActionButton("重跑失败节点", () => rerunRunNode(failedNode.id, false)));
+    controls.appendChild(createRunActionButton("重跑失败节点及下游", () => rerunRunNode(failedNode.id, true)));
+  }
+}
+
+function renderRunNodeDetail(panel) {
+  const nodeId = state.activeRunNodeId || firstInterestingRunNodeId();
+  state.activeRunNodeId = nodeId;
+  const node = findPlanNode(nodeId);
+  const runNode = state.run?.nodes?.[nodeId] || {};
+  if (!node) {
+    panel.innerHTML = '<div class="run-empty">选择一个时间线节点查看详情。</div>';
+    return;
+  }
+  const runDir = state.run?.paths?.runDir || "";
+  const outputPath = runDir ? `${runDir}/${node.id}.md` : "";
+  const promptPath = runDir ? `${runDir}/${node.id}.prompt.md` : "";
+  panel.innerHTML = `
+    <div class="run-node-detail">
+      <div class="run-node-head">
+        <div>
+          <strong>${escapeHtml(node.title || node.id)}</strong>
+          <span>${escapeHtml(node.id)} · ${escapeHtml(modeDisplayLabel(node.mode))} · ${escapeHtml(statusLabel(runNode.status || "pending"))}</span>
+        </div>
+        <div class="run-node-actions"></div>
+      </div>
+      <div class="run-node-meta">
+        <span>Agent: ${escapeHtml(node.agent || "")}</span>
+        <span>模型: ${escapeHtml(node.model || "默认")}</span>
+        <span>推理: ${escapeHtml(node.reasoningEffort || "auto")}</span>
+        <span>沙箱: ${escapeHtml(node.sandbox || "workspace-write")}</span>
+        <span>联网: ${escapeHtml(node.networkPolicy || "confirm")}</span>
+        <span>耗时: ${escapeHtml(formatDuration(runNode.durationMs || 0))}</span>
+      </div>
+      <div class="run-node-columns">
+        <section>
+          <div class="review-section-title">任务</div>
+          <p>${escapeHtml(node.task || "")}</p>
+        </section>
+        <section>
+          <div class="review-section-title">输出摘要</div>
+          <pre>${escapeHtml(compactReviewOutput(runNode.output || runNode.error || "暂无输出。", 1800))}</pre>
+        </section>
+      </div>
+    </div>
+  `;
+  const actions = panel.querySelector(".run-node-actions");
+  actions.appendChild(createRunActionButton("重跑", () => rerunRunNode(node.id, false)));
+  actions.appendChild(createRunActionButton("重跑下游", () => rerunRunNode(node.id, true)));
+  if (nodeState(node.id) === "waiting") actions.appendChild(createRunActionButton("确认", () => openReviewDialog(node.id)));
+  actions.appendChild(createPathActionButton("Prompt", icons.open, promptPath, "item", Boolean(promptPath)));
+  actions.appendChild(createPathActionButton("输出", icons.open, outputPath, "item", Boolean(outputPath)));
+}
+
+function createRunActionButton(label, onClick) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "mini-button";
+  button.textContent = label;
+  button.addEventListener("click", onClick);
+  return button;
+}
+
+function firstInterestingRunNodeId() {
+  const nodes = state.run?.plan?.nodes || state.plan?.nodes || [];
+  const byStatus = (status) => nodes.find((node) => state.run?.nodes?.[node.id]?.status === status)?.id;
+  return byStatus("running") || byStatus("waiting") || byStatus("failed") || nodes[0]?.id || "";
+}
+
+function formatDuration(ms) {
+  if (!ms) return "0s";
+  if (ms < 1000) return `${ms}ms`;
+  return `${Math.round(ms / 1000)}s`;
 }
 
 async function continueNode(nodeId, note = "人工确认通过。") {
@@ -2738,6 +3165,41 @@ async function stopRun() {
   await api(`/api/runs/${state.run.id}/stop`, { method: "POST", body: "{}" });
 }
 
+async function resumeRun(extraOptions = {}) {
+  if (!state.run) return;
+  try {
+    const data = await api(`/api/runs/${state.run.id}/resume`, {
+      method: "POST",
+      body: JSON.stringify({ runOptions: { ...(state.run.runOptions || {}), ...extraOptions } })
+    });
+    state.run = data.run || state.run;
+    state.logs.push("[run:resumed] 已继续运行");
+    renderAll();
+  } catch (error) {
+    state.logs.push(`[error] ${error.message}`);
+    renderRun();
+  }
+}
+
+async function rerunRunNode(nodeId, downstream = false) {
+  if (!state.run || !nodeId) return;
+  try {
+    const data = await api(`/api/runs/${state.run.id}/nodes/${encodeURIComponent(nodeId)}/rerun`, {
+      method: "POST",
+      body: JSON.stringify({ downstream })
+    });
+    state.run = data.run || state.run;
+    state.activeRunNodeId = nodeId;
+    state.runPanelTab = "node";
+    state.logs.push(`[node:reset] ${nodeId}${downstream ? " 及下游" : ""} 已重置并重新调度`);
+    connectRunEvents(state.run.id);
+    renderAll();
+  } catch (error) {
+    state.logs.push(`[error] ${error.message}`);
+    renderRun();
+  }
+}
+
 function clearLogs() {
   state.logs = [];
   renderRun();
@@ -2754,7 +3216,9 @@ function statusLabel(status) {
     completed: "已完成",
     failed: "失败",
     waiting: "等待确认",
-    cancelled: "已停止"
+    cancelled: "已停止",
+    paused: "已暂停",
+    skipped: "已跳过"
   }[status] || status || "未知";
 }
 
@@ -2779,6 +3243,16 @@ function bindEvents() {
   $("generateBtn").addEventListener("click", generatePlan);
   $("sampleBtn").addEventListener("click", loadSample);
   $("refreshSkillsBtn").addEventListener("click", () => loadSkills());
+  $("refreshTemplatesBtn").addEventListener("click", loadTemplates);
+  $("templateSelect").addEventListener("change", (event) => {
+    state.selectedTemplateId = event.target.value;
+    renderTemplates();
+  });
+  $("loadTemplateBtn").addEventListener("click", loadSelectedTemplate);
+  $("saveTemplateBtn").addEventListener("click", saveCurrentTemplate);
+  $("exportTemplateBtn").addEventListener("click", exportSelectedTemplate);
+  $("importTemplateBtn").addEventListener("click", () => $("templateImportInput").click());
+  $("templateImportInput").addEventListener("change", (event) => importTemplateFile(event.target.files?.[0]));
   $("modelInput").addEventListener("change", () => {
     renderEffortSelect($("effortInput"), $("effortInput").value || state.config?.models?.reasoningEffort || "medium", {
       provider: currentToolProvider(),
@@ -2830,6 +3304,19 @@ function bindEvents() {
   $("runBtn").addEventListener("click", startRun);
   $("stopRunBtn").addEventListener("click", stopRun);
   $("clearLogsBtn").addEventListener("click", clearLogs);
+  for (const button of document.querySelectorAll(".run-tab")) {
+    button.addEventListener("click", () => {
+      state.runPanelTab = button.dataset.runTab || "overview";
+      renderRun();
+    });
+  }
+  for (const input of ["runMaxConcurrencyInput", "runNetworkPolicyInput", "runSkipCompletedInput", "runPauseOnFailureInput", "runNodeTimeoutInput", "runTimeoutInput", "runTokenBudgetInput"]) {
+    $(input).addEventListener("input", updateRunOptionsDraftFromDialog);
+    $(input).addEventListener("change", updateRunOptionsDraftFromDialog);
+  }
+  $("closeRunConfirmBtn").addEventListener("click", closeRunConfirmDialog);
+  $("cancelRunConfirmBtn").addEventListener("click", closeRunConfirmDialog);
+  $("executeRunBtn").addEventListener("click", startRunConfirmed);
   $("closeReviewBtn").addEventListener("click", closeReviewDialog);
   $("cancelReviewBtn").addEventListener("click", closeReviewDialog);
   $("submitReviewBtn").addEventListener("click", submitReviewDialog);
@@ -2840,6 +3327,10 @@ function bindEvents() {
     if (event.target === event.currentTarget) closeReviewDialog();
   });
   document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && state.runDialogOpen) {
+      closeRunConfirmDialog();
+      return;
+    }
     if (event.key === "Escape" && state.reviewDialog) {
       closeReviewDialog();
       return;
@@ -2855,6 +3346,6 @@ function bindEvents() {
 initButtons();
 bindEvents();
 await Promise.all([loadHealth(), loadConfig()]);
-await loadSkills();
+await Promise.all([loadSkills(), loadTemplates()]);
 renderAll();
 maybePromptToolChoice();

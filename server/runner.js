@@ -5,24 +5,38 @@ import { ROOT, RUNS_DIR, clampText, ensureDir, parseMaybeJson, safeId } from "./
 import { defaultReviewPolicy, normalizeOutputRequirement, normalizePlan, normalizeReviewPolicy } from "./planner.js";
 import { defaultModelForProvider, normalizeToolProvider, providerLabel, runAgentExec } from "./codexRunner.js";
 
+export const DEFAULT_RUN_OPTIONS = {
+  maxConcurrency: 2,
+  networkPolicy: "plan",
+  skipCompleted: false,
+  pauseOnFailure: true,
+  nodeTimeoutSeconds: 0,
+  runTimeoutSeconds: 0,
+  tokenBudget: 0
+};
+
 export class RunManager {
   constructor({ root = ROOT } = {}) {
     this.root = root;
     this.runs = new Map();
   }
 
-  async start({ goal, plan, session }) {
+  async start({ goal, plan, session, runOptions = {} }) {
     const runId = safeId("run");
     const normalized = normalizePlan(plan, goal);
+    const options = normalizeRunOptions(runOptions, normalized);
+    const executablePlan = applyRunOptionsToPlan(normalized, options);
     const runBaseDir = session?.paths?.runsDir || RUNS_DIR;
     const runDir = path.join(runBaseDir, runId);
     await ensureDir(runDir);
-    await fs.writeFile(path.join(runDir, "plan.json"), JSON.stringify(normalized, null, 2));
+    await fs.writeFile(path.join(runDir, "plan.json"), JSON.stringify(executablePlan, null, 2));
+    await fs.writeFile(path.join(runDir, "run-options.json"), JSON.stringify(options, null, 2));
 
     const run = {
       id: runId,
       goal: clampText(goal, 4000),
-      plan: normalized,
+      plan: executablePlan,
+      options,
       runDir,
       sessionId: session?.id || "",
       sessionDir: session?.paths?.sessionDir || "",
@@ -35,30 +49,33 @@ export class RunManager {
       status: "running",
       startedAt: new Date().toISOString(),
       finishedAt: null,
+      pauseReason: "",
+      pauseDetail: "",
       events: [],
       nodes: Object.fromEntries(
-        normalized.nodes.map((node) => [
+        executablePlan.nodes.map((node) => [
           node.id,
-          {
-            id: node.id,
-            status: "pending",
-            startedAt: null,
-            finishedAt: null,
-            output: "",
-            error: "",
-            durationMs: 0,
-            waitingReason: "",
-            iterationCount: 0,
-            latestDecision: null
-          }
+          createNodeState(node.id)
         ])
       ),
+      usage: {
+        estimatedTokens: 0,
+        promptTokens: 0,
+        outputTokens: 0,
+        logTokens: 0,
+        logBytes: 0,
+        completedNodes: 0,
+        failedNodes: 0
+      },
       iterationBriefs: {},
       emitter: new EventEmitter(),
       waiters: [],
+      pauseResolvers: [],
       reviewResolvers: new Map(),
       controllers: new Map(),
-      cancelled: false
+      cancelled: false,
+      driving: false,
+      failurePauseAcknowledged: false
     };
     run.defaultExecutorModel = session?.config?.models?.executor
       || executorModelFromEnv(run.toolProvider)
@@ -66,12 +83,8 @@ export class RunManager {
 
     this.runs.set(runId, run);
     this.emit(run, "run:started", this.snapshot(run));
-    this.drive(run).catch((error) => {
-      run.status = run.cancelled ? "cancelled" : "failed";
-      run.finishedAt = new Date().toISOString();
-      this.emit(run, "run:error", { error: error.message });
-      this.emit(run, "run:finished", this.snapshot(run));
-    });
+    await this.writeCheckpoint(run);
+    this.ensureDrive(run);
     return this.snapshot(run);
   }
 
@@ -87,8 +100,12 @@ export class RunManager {
       status: run.status,
       startedAt: run.startedAt,
       finishedAt: run.finishedAt,
+      pauseReason: run.pauseReason || "",
+      pauseDetail: run.pauseDetail || "",
       plan: run.plan,
       nodes: run.nodes,
+      runOptions: run.options,
+      usage: run.usage,
       paths: {
         workspaceRoot: run.workspaceRoot,
         sessionDir: run.sessionDir,
@@ -99,6 +116,22 @@ export class RunManager {
       toolProvider: run.toolProvider,
       events: run.events.slice(-300)
     };
+  }
+
+  ensureDrive(run) {
+    if (!run || run.driving || ["completed", "failed", "cancelled"].includes(run.status)) return;
+    run.driving = true;
+    this.drive(run)
+      .catch((error) => {
+        run.status = run.cancelled ? "cancelled" : "failed";
+        run.finishedAt = new Date().toISOString();
+        this.emit(run, "run:error", { error: error.message });
+        this.emit(run, "run:finished", this.snapshot(run));
+      })
+      .finally(() => {
+        run.driving = false;
+        this.writeCheckpoint(run).catch(() => {});
+      });
   }
 
   subscribe(runId, res) {
@@ -139,11 +172,74 @@ export class RunManager {
     return { ok: true };
   }
 
+  resume(runId, options = {}) {
+    const run = this.get(runId);
+    if (!run) return { ok: false, error: "Run not found" };
+    if (run.status !== "paused") return { ok: false, error: "Run is not paused" };
+    run.options = normalizeRunOptions({ ...run.options, ...options }, run.plan);
+    run.status = "running";
+    run.pauseReason = "";
+    run.pauseDetail = "";
+    run.failurePauseAcknowledged = false;
+    const resolvers = run.pauseResolvers.splice(0);
+    for (const resolve of resolvers) resolve();
+    this.emit(run, "run:resumed", this.snapshot(run));
+    this.wake(run);
+    this.ensureDrive(run);
+    return { ok: true, run: this.snapshot(run) };
+  }
+
+  rerunNode(runId, nodeId, { downstream = false } = {}) {
+    const run = this.get(runId);
+    if (!run) return { ok: false, error: "Run not found" };
+    const node = run.plan.nodes.find((item) => item.id === nodeId);
+    if (!node) return { ok: false, error: "Node not found" };
+    for (const controller of run.controllers.values()) controller.abort();
+    const affected = new Set([nodeId]);
+    if (downstream) {
+      for (const descendantId of collectRunDescendantIds(run.plan, [nodeId])) affected.add(descendantId);
+    }
+    for (const id of affected) {
+      const previous = run.nodes[id] || createNodeState(id);
+      run.reviewResolvers.delete(id);
+      run.nodes[id] = {
+        ...createNodeState(id),
+        attempts: previous.attempts || 0,
+        iterationCount: previous.iterationCount || 0
+      };
+    }
+    run.cancelled = false;
+    run.status = "running";
+    run.finishedAt = null;
+    run.pauseReason = "";
+    run.pauseDetail = "";
+    run.failurePauseAcknowledged = false;
+    const resolvers = run.pauseResolvers.splice(0);
+    for (const resolve of resolvers) resolve();
+    this.emit(run, "node:reset", { nodeId, affectedNodeIds: [...affected], downstream: Boolean(downstream) });
+    this.wake(run);
+    this.ensureDrive(run);
+    return { ok: true, run: this.snapshot(run), affectedNodeIds: [...affected] };
+  }
+
   async drive(run) {
     const active = new Map();
-    const maxConcurrency = Math.max(1, Math.min(run.plan.maxConcurrency || 2, 4));
+    const maxConcurrency = Math.max(1, Math.min(run.options?.maxConcurrency || run.plan.maxConcurrency || 2, 8));
 
     while (!run.cancelled) {
+      if (this.isComplete(run)) {
+        run.status = "completed";
+        run.finishedAt = new Date().toISOString();
+        await this.writeSummary(run);
+        this.emit(run, "run:finished", this.snapshot(run));
+        return;
+      }
+
+      if (this.shouldPauseForBudget(run)) {
+        await this.pauseRun(run, "budget", this.budgetPauseDetail(run));
+        continue;
+      }
+
       const runnable = this.runnableNodes(run, active);
       while (active.size < maxConcurrency && runnable.length) {
         const node = runnable.shift();
@@ -154,7 +250,6 @@ export class RunManager {
             state.error = error.message;
             state.finishedAt = new Date().toISOString();
             this.emit(run, "node:failed", { nodeId: node.id, error: error.message });
-            throw error;
           })
           .finally(() => {
             active.delete(node.id);
@@ -163,16 +258,13 @@ export class RunManager {
         active.set(node.id, promise);
       }
 
-      if (this.isComplete(run)) {
-        run.status = "completed";
-        run.finishedAt = new Date().toISOString();
-        await this.writeSummary(run);
-        this.emit(run, "run:finished", this.snapshot(run));
-        return;
-      }
-
       const failed = Object.values(run.nodes).find((node) => node.status === "failed");
       if (failed) {
+        if (run.options?.pauseOnFailure && !run.failurePauseAcknowledged) {
+          run.failurePauseAcknowledged = true;
+          await this.pauseRun(run, "failure", `${failed.id}: ${failed.error || "节点执行失败"}`);
+          continue;
+        }
         run.status = "failed";
         run.finishedAt = new Date().toISOString();
         this.emit(run, "run:finished", this.snapshot(run));
@@ -214,6 +306,9 @@ export class RunManager {
     state.status = node.mode === "human-review" || node.requiresReview ? "waiting" : "running";
     state.waitingReason = state.status === "waiting" ? "human-review" : "";
     state.startedAt = new Date().toISOString();
+    state.finishedAt = null;
+    state.error = "";
+    state.attempts = (state.attempts || 0) + 1;
 
     if (state.status === "waiting") {
       const approvalPromise = new Promise((resolve) => run.reviewResolvers.set(node.id, resolve));
@@ -231,6 +326,7 @@ export class RunManager {
       state.finishedAt = new Date().toISOString();
       state.durationMs = Date.parse(state.finishedAt) - Date.parse(state.startedAt);
       await fs.writeFile(path.join(run.runDir, `${node.id}.md`), state.output);
+      run.usage.completedNodes += 1;
       this.emit(run, "node:completed", { nodeId: node.id, output: state.output });
       return;
     }
@@ -277,6 +373,10 @@ export class RunManager {
     state.output = output;
     state.finishedAt = new Date().toISOString();
     state.durationMs = result.durationMs;
+    state.usage = result.usage || estimateNodeUsage(output, "");
+    run.usage.outputTokens += state.usage.outputTokens || estimateTokens(output);
+    run.usage.estimatedTokens += state.usage.outputTokens || estimateTokens(output);
+    run.usage.completedNodes += 1;
     await fs.writeFile(path.join(run.runDir, `${node.id}.md`), state.output || "");
     this.emit(run, "node:completed", { nodeId: node.id, output: state.output, durationMs: state.durationMs });
   }
@@ -285,9 +385,14 @@ export class RunManager {
     const prompt = this.nodePrompt(run, node, options);
     const promptSuffix = options.networkApproved ? ".network-approved" : "";
     await fs.writeFile(path.join(run.runDir, `${node.id}${promptSuffix}.prompt.md`), prompt);
+    const promptTokens = estimateTokens(prompt);
+    run.usage.promptTokens += promptTokens;
+    run.usage.estimatedTokens += promptTokens;
 
     if (process.env.USE_MOCK_CODEX === "1") {
-      return this.executeMockNode(run, node, state, outputPath);
+      const result = await this.executeMockNode(run, node, state, outputPath);
+      result.usage = estimateNodeUsage(result.finalMessage || result.stdout || "", prompt);
+      return result;
     }
 
     const controller = new AbortController();
@@ -302,10 +407,14 @@ export class RunManager {
         text: `${label} 仍在执行 ${node.title}，已运行 ${elapsedSeconds}s。`
       });
     }, 15000);
+    const nodeTimeoutMs = Math.max(0, Number(run.options?.nodeTimeoutSeconds || 0)) * 1000;
+    const timeout = nodeTimeoutMs
+      ? setTimeout(() => controller.abort(new Error(`Node timed out after ${run.options.nodeTimeoutSeconds}s`)), nodeTimeoutMs)
+      : null;
 
     try {
       const sandbox = this.runtimeSandbox(node, options);
-      return await runAgentExec({
+      const result = await runAgentExec({
         provider: run.toolProvider,
         prompt,
         cwd: run.workspaceRoot || this.root,
@@ -327,8 +436,11 @@ export class RunManager {
           if (cleaned) this.emit(run, "node:log", { nodeId: node.id, stream: event.type, text: cleaned });
         }
       });
+      result.usage = estimateNodeUsage(result.finalMessage || result.stdout || "", prompt);
+      return result;
     } finally {
       clearInterval(heartbeat);
+      if (timeout) clearTimeout(timeout);
       run.controllers.delete(node.id);
     }
   }
@@ -578,6 +690,10 @@ ${networkRules.join("\n")}
       maxIterations: policy.maxIterations
     };
     state.durationMs = result.durationMs;
+    state.usage = result.usage || estimateNodeUsage(output, "");
+    run.usage.outputTokens += state.usage.outputTokens || estimateTokens(output);
+    run.usage.estimatedTokens += state.usage.outputTokens || estimateTokens(output);
+    run.usage.completedNodes += finalDecision === "pass" || finalDecision === "capped" ? 1 : 0;
 
     await fs.writeFile(path.join(run.runDir, `${node.id}.md`), finalOutput);
     await this.writeIterationRecord(run, node, {
@@ -745,6 +861,31 @@ ${networkRules.join("\n")}
     return Object.values(run.nodes).every((node) => ["completed", "skipped"].includes(node.status));
   }
 
+  shouldPauseForBudget(run) {
+    if (run.status === "paused") return false;
+    const budget = Number(run.options?.tokenBudget || 0);
+    if (budget > 0 && run.usage.estimatedTokens >= budget) return true;
+    const timeoutSeconds = Number(run.options?.runTimeoutSeconds || 0);
+    if (timeoutSeconds > 0 && Date.now() - Date.parse(run.startedAt) >= timeoutSeconds * 1000) return true;
+    return false;
+  }
+
+  budgetPauseDetail(run) {
+    const budget = Number(run.options?.tokenBudget || 0);
+    if (budget > 0 && run.usage.estimatedTokens >= budget) {
+      return `预计 token ${run.usage.estimatedTokens} 已达到预算 ${budget}`;
+    }
+    return `运行时间已达到 ${run.options?.runTimeoutSeconds || 0}s 上限`;
+  }
+
+  async pauseRun(run, reason, detail = "") {
+    run.status = "paused";
+    run.pauseReason = reason;
+    run.pauseDetail = clampText(detail, 1000);
+    this.emit(run, "run:paused", this.snapshot(run));
+    await new Promise((resolve) => run.pauseResolvers.push(resolve));
+  }
+
   waitForWake(run) {
     return new Promise((resolve) => run.waiters.push(resolve));
   }
@@ -758,6 +899,14 @@ ${networkRules.join("\n")}
     const event = { name, data, at: new Date().toISOString() };
     run.events.push(event);
     if (run.events.length > 1000) run.events.splice(0, run.events.length - 1000);
+    if (name === "node:log" && data?.text) {
+      const text = String(data.text || "");
+      const tokens = estimateTokens(text);
+      run.usage.logBytes += Buffer.byteLength(text);
+      run.usage.logTokens += tokens;
+      run.usage.estimatedTokens += tokens;
+    }
+    if (name === "node:failed") run.usage.failedNodes += 1;
     run.emitter.emit("event", event);
     if (run.sessionDir) {
       const line = JSON.stringify({
@@ -768,6 +917,14 @@ ${networkRules.join("\n")}
       });
       fs.appendFile(path.join(run.sessionDir, "conversation.jsonl"), `${line}\n`).catch(() => {});
     }
+    if (name !== "node:log") this.writeCheckpoint(run).catch(() => {});
+  }
+
+  async writeCheckpoint(run) {
+    if (!run?.runDir) return;
+    const checkpoint = this.snapshot(run);
+    checkpoint.updatedAt = new Date().toISOString();
+    await fs.writeFile(path.join(run.runDir, "checkpoint.json"), `${JSON.stringify(checkpoint, null, 2)}\n`);
   }
 
   async writeSummary(run) {
@@ -929,6 +1086,83 @@ function normalizeOutputRequirementCustom(custom, type) {
     .replace(/Markdown\s*深度研究报告/gi, replacement)
     .replace(/中文\s*MD\s*文档/gi, `中文${replacement}`)
     .replace(/MD\s*文档|MD文档|Markdown|\.md\b/gi, replacement);
+}
+
+export function normalizeRunOptions(value = {}, plan = {}) {
+  const source = value && typeof value === "object" ? value : {};
+  const maxConcurrency = clampInteger(source.maxConcurrency, DEFAULT_RUN_OPTIONS.maxConcurrency, 1, 8);
+  const networkPolicy = ["plan", "confirm", "full-access"].includes(source.networkPolicy)
+    ? source.networkPolicy
+    : DEFAULT_RUN_OPTIONS.networkPolicy;
+  return {
+    maxConcurrency,
+    networkPolicy,
+    skipCompleted: Boolean(source.skipCompleted),
+    pauseOnFailure: source.pauseOnFailure === undefined ? DEFAULT_RUN_OPTIONS.pauseOnFailure : Boolean(source.pauseOnFailure),
+    nodeTimeoutSeconds: clampInteger(source.nodeTimeoutSeconds, DEFAULT_RUN_OPTIONS.nodeTimeoutSeconds, 0, 24 * 60 * 60),
+    runTimeoutSeconds: clampInteger(source.runTimeoutSeconds, DEFAULT_RUN_OPTIONS.runTimeoutSeconds, 0, 7 * 24 * 60 * 60),
+    tokenBudget: clampInteger(source.tokenBudget, DEFAULT_RUN_OPTIONS.tokenBudget, 0, 100_000_000),
+    estimatedNodeCount: Array.isArray(plan?.nodes) ? plan.nodes.length : 0
+  };
+}
+
+function applyRunOptionsToPlan(plan, options) {
+  const normalized = normalizePlan(plan, "");
+  return {
+    ...normalized,
+    maxConcurrency: options.maxConcurrency || normalized.maxConcurrency || DEFAULT_RUN_OPTIONS.maxConcurrency,
+    nodes: normalized.nodes.map((node) => {
+      if (!["confirm", "full-access"].includes(options.networkPolicy) || node.mode === "human-review" || node.requiresReview) {
+        return node;
+      }
+      return { ...node, networkPolicy: options.networkPolicy };
+    })
+  };
+}
+
+function createNodeState(nodeId) {
+  return {
+    id: nodeId,
+    status: "pending",
+    startedAt: null,
+    finishedAt: null,
+    output: "",
+    error: "",
+    durationMs: 0,
+    waitingReason: "",
+    iterationCount: 0,
+    latestDecision: null,
+    attempts: 0,
+    usage: {
+      promptTokens: 0,
+      outputTokens: 0,
+      estimatedTokens: 0
+    }
+  };
+}
+
+function estimateNodeUsage(output, prompt) {
+  const promptTokens = estimateTokens(prompt);
+  const outputTokens = estimateTokens(output);
+  return {
+    promptTokens,
+    outputTokens,
+    estimatedTokens: promptTokens + outputTokens
+  };
+}
+
+function estimateTokens(text) {
+  const normalized = String(text || "").trim();
+  if (!normalized) return 0;
+  const cjk = (normalized.match(/[\u3400-\u9fff]/g) || []).length;
+  const latin = Math.max(0, normalized.length - cjk);
+  return Math.max(1, Math.ceil(cjk * 0.75 + latin / 4));
+}
+
+function clampInteger(value, fallback, min, max) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(Math.max(parsed, min), max);
 }
 
 function sleep(ms) {

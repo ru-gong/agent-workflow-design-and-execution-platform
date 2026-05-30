@@ -12,6 +12,7 @@ import { getRuntimeConfig, publicRuntimeConfig, saveConfig } from "./config.js";
 import { createSession, getSession, getSessionContext, getSessionManifest, saveCurrentPlan, updateSessionTitle } from "./sessionStore.js";
 import { pickFolder } from "./folderPicker.js";
 import { openLocalPath } from "./pathActions.js";
+import { deleteTemplate, getTemplate, listTemplates, saveTemplate } from "./templateStore.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
@@ -201,6 +202,37 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  if (req.method === "GET" && url.pathname === "/api/templates") {
+    json(res, 200, { templates: await listTemplates(await getRuntimeConfig()) });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/templates") {
+    const body = await readJsonBody(req, 2_000_000);
+    if (!body.plan || !Array.isArray(body.plan.nodes)) {
+      badRequest(res, "Missing template plan");
+      return;
+    }
+    const template = await saveTemplate(body, await getRuntimeConfig());
+    json(res, 201, { template });
+    return;
+  }
+
+  const templateMatch = url.pathname.match(/^\/api\/templates\/([^/]+)$/);
+  if (req.method === "GET" && templateMatch) {
+    json(res, 200, { template: await getTemplate(templateMatch[1], await getRuntimeConfig()) });
+    return;
+  }
+
+  if (req.method === "DELETE" && templateMatch) {
+    try {
+      json(res, 200, await deleteTemplate(templateMatch[1], await getRuntimeConfig()));
+    } catch (error) {
+      json(res, error.statusCode || 500, { error: error.message || "删除模板失败。" });
+    }
+    return;
+  }
+
   if (req.method === "POST" && url.pathname === "/api/runs") {
     const body = await readJsonBody(req, 2_000_000);
     if (!body.plan || !Array.isArray(body.plan.nodes)) {
@@ -215,7 +247,12 @@ async function handleApi(req, res, url) {
       ? await saveCurrentPlan(body.sessionId, body.plan, { reason: "run:plan-snapshot", runtime: requestRuntime })
       : await createSession({ goal, plan: body.plan, source: "manual-run", runtime: requestRuntime });
     const context = await getSessionContext(session.id, requestRuntime);
-    const snapshot = await manager.start({ goal, plan: body.plan, session: { ...session, paths: context.paths } });
+    const snapshot = await manager.start({
+      goal,
+      plan: body.plan,
+      session: { ...session, paths: context.paths },
+      runOptions: body.runOptions || {}
+    });
     json(res, 201, { ...snapshot, session });
     return;
   }
@@ -247,6 +284,22 @@ async function handleApi(req, res, url) {
   if (req.method === "POST" && continueMatch) {
     const body = await readJsonBody(req);
     const result = manager.continue(continueMatch[1], continueMatch[2], String(body.note || "Approved in visual orchestrator."));
+    json(res, result.ok ? 200 : 409, result);
+    return;
+  }
+
+  const resumeMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/resume$/);
+  if (req.method === "POST" && resumeMatch) {
+    const body = await readJsonBody(req);
+    const result = manager.resume(resumeMatch[1], body.runOptions || body);
+    json(res, result.ok ? 200 : 409, result);
+    return;
+  }
+
+  const rerunMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/nodes\/([^/]+)\/rerun$/);
+  if (req.method === "POST" && rerunMatch) {
+    const body = await readJsonBody(req);
+    const result = manager.rerunNode(rerunMatch[1], rerunMatch[2], { downstream: Boolean(body.downstream) });
     json(res, result.ok ? 200 : 409, result);
     return;
   }

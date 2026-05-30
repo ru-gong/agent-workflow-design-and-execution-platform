@@ -38,6 +38,13 @@ npm test
 - 输出物要求修复：结果汇总节点选择 PPT、HTML、表格、图片、PDF、Word 文档等类型时，前端提示词和后端执行 prompt 都会以用户选中的输出类型为准，不再被残留的 Markdown 默认文案覆盖。
 - Windows 兼容性：路径配置保留 `C:\...` 盘符，原生文件夹选择和本机 CLI 启动路径做了 macOS/Windows 兼容处理。
 
+## 2026-05-30 更新
+
+- 执行前预览：点击“确认执行”后会先展示节点数量、并发、人工确认、自动评审、联网节点和预计 token，并允许调整最大并发、联网策略、超时、token 预算、失败暂停和恢复时跳过已完成节点。
+- 运行治理：运行器会保存 `checkpoint.json` 与 `run-options.json`，支持预算/超时暂停、失败暂停、继续运行、重跑单节点和重跑节点及其下游。
+- 分层运行视图：底部执行区增加“总览 / 节点详情 / 日志”三层视图，总览展示状态和预算，节点详情展示任务、参数、输出摘要、Prompt/输出快捷打开和重跑操作。
+- 工作流模板库：左侧新增模板入口，支持从内置模板创建工作流、保存当前画布为模板、导出模板 JSON、导入模板 JSON。内置模板包括深度行业研究、代码库审计、PR/变更自动评审、资料收集到 PPT、多来源事实核查。
+
 ## Development History
 
 历史开发脉络见 [`DEVELOPMENT_HISTORY.md`](./DEVELOPMENT_HISTORY.md)。Git 操作规则保存在本地 `GIT_WORKFLOW_RULES.md`，该文件按项目约定不纳入仓库。
@@ -53,7 +60,10 @@ npm test
 - `POST /api/runs`：创建运行，按 DAG 依赖自动调度节点。
 - `GET /api/runs/:id/events`：通过 SSE 推送节点状态、日志和最终结果。
 - `POST /api/runs/:id/nodes/:nodeId/continue`：人工确认节点继续执行；也用于确认“需要时确认”的联网请求，确认后该节点会以联网高权限模式重跑。
+- `POST /api/runs/:id/resume`：从预算、超时或失败暂停状态继续运行。
+- `POST /api/runs/:id/nodes/:nodeId/rerun`：重跑某个节点，可选择同时重跑其下游节点。
 - `POST /api/runs/:id/stop`：停止运行并取消活跃工具子进程。
+- `GET /api/templates` / `POST /api/templates` / `GET /api/templates/:id` / `DELETE /api/templates/:id`：管理工作流模板库。
 - `GET /api/weather?city=...`：天气查询示例产物的后端代理，使用 Open-Meteo，无需密钥。
 
 ## Design Notes

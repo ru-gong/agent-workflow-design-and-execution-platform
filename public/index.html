@@ -141,6 +141,26 @@
             </details>
           </section>
 
+          <section class="panel-section template-section">
+            <div class="section-title with-action">
+              <span>工作流模板</span>
+              <button id="refreshTemplatesBtn" class="mini-button" type="button">刷新</button>
+            </div>
+            <select id="templateSelect" class="compact-input">
+              <option value="">选择模板</option>
+            </select>
+            <div class="template-actions">
+              <button id="loadTemplateBtn" class="mini-button" type="button">从模板创建</button>
+              <button id="saveTemplateBtn" class="mini-button" type="button">保存当前</button>
+            </div>
+            <div class="template-actions">
+              <button id="exportTemplateBtn" class="mini-button" type="button">导出</button>
+              <button id="importTemplateBtn" class="mini-button" type="button">导入</button>
+              <input id="templateImportInput" class="hidden" type="file" accept="application/json,.json" />
+            </div>
+            <div id="templateStatus" class="settings-status">模板未加载</div>
+          </section>
+
           <section class="panel-section grow">
             <div class="section-title with-action">
               <span>Skills</span>
@@ -205,7 +225,13 @@
               <button id="clearLogsBtn" class="mini-button" type="button"></button>
             </div>
             <div id="artifactQuickPanel" class="artifact-quick-panel"></div>
+            <div class="run-tabs" role="tablist" aria-label="执行视图">
+              <button class="run-tab active" data-run-tab="overview" type="button">总览</button>
+              <button class="run-tab" data-run-tab="node" type="button">节点详情</button>
+              <button class="run-tab" data-run-tab="logs" type="button">日志</button>
+            </div>
             <div id="runTimeline" class="run-timeline"></div>
+            <div id="runDetailPanel" class="run-detail-panel"></div>
             <pre id="logOutput" class="log-output"></pre>
           </div>
         </section>
@@ -236,6 +262,58 @@
         </div>
         <div id="toolChoiceCards" class="tool-choice-cards"></div>
       </div>
+    </div>
+
+    <div id="runConfirmModal" class="review-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="runConfirmTitle">
+      <section class="run-confirm-dialog">
+        <header class="review-dialog-header">
+          <div>
+            <div id="runConfirmTitle" class="section-title">执行预览</div>
+            <div id="runConfirmSubtitle" class="review-node-meta">确认预算、权限与恢复策略后再启动。</div>
+          </div>
+          <button id="closeRunConfirmBtn" class="icon-button" type="button" title="关闭" aria-label="关闭"></button>
+        </header>
+        <div id="runPreviewSummary" class="run-preview-summary"></div>
+        <div class="run-option-grid">
+          <label>
+            <span>最大并发</span>
+            <input id="runMaxConcurrencyInput" class="compact-input" type="number" min="1" max="8" />
+          </label>
+          <label>
+            <span>联网策略</span>
+            <select id="runNetworkPolicyInput" class="compact-input">
+              <option value="plan">遵循节点配置</option>
+              <option value="confirm">所有节点需要时确认</option>
+              <option value="full-access">允许所有执行节点联网</option>
+            </select>
+          </label>
+          <label>
+            <span>单节点超时秒</span>
+            <input id="runNodeTimeoutInput" class="compact-input" type="number" min="0" max="86400" />
+          </label>
+          <label>
+            <span>总运行超时秒</span>
+            <input id="runTimeoutInput" class="compact-input" type="number" min="0" max="604800" />
+          </label>
+          <label>
+            <span>预计 token 预算</span>
+            <input id="runTokenBudgetInput" class="compact-input" type="number" min="0" max="100000000" />
+          </label>
+          <label class="check-row run-check-row">
+            <input id="runPauseOnFailureInput" type="checkbox" />
+            <span>节点失败后先暂停，允许重跑或查看详情</span>
+          </label>
+        </div>
+        <label class="check-row run-check-row">
+          <input id="runSkipCompletedInput" type="checkbox" />
+          <span>恢复运行时跳过已完成节点</span>
+        </label>
+        <div id="runPreviewNodes" class="run-preview-nodes"></div>
+        <div class="review-actions">
+          <button id="cancelRunConfirmBtn" class="ghost-button" type="button">取消</button>
+          <button id="executeRunBtn" class="primary-button" type="button">确认执行</button>
+        </div>
+      </section>
     </div>
 
     <div id="reviewModal" class="review-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="reviewModalTitle">
@@ -271,6 +349,6 @@
       <button class="skill-chip" type="button"></button>
     </template>
 
-    <script type="module" src="/app.js?v=20260518-output-format-fix"></script>
+    <script type="module" src="/app.js?v=20260530-governance"></script>
   </body>
 </html>
