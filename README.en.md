@@ -43,6 +43,11 @@ npm test
 - Layered run view: the bottom execution panel now has Overview, Node Detail, and Logs views. Overview shows status and budget, while Node Detail exposes task parameters, output summary, prompt/output quick open actions, and rerun controls.
 - Workflow templates: the left panel now includes a template library. Users can create a workflow from built-in templates, save the current canvas as a template, export template JSON, and import template JSON. Built-ins include deep industry research, codebase audit, PR/change review, sources-to-PPT, and multi-source fact checking.
 
+## Latest Updates - 2026-05-31
+
+- Token budget estimates are now more realistic: the execution preview no longer estimates from raw plan JSON size only. It accounts for node prompt scaffolding, the global goal, upstream context, expected outputs, logs, and tool-call overhead, then shows a conservative range plus prompt/output/log breakdown.
+- Frontend and backend estimates now share the same CJK-aware tokenizer, so Chinese workflows are no longer heavily underestimated during live run accounting.
+
 ## What It Does
 
 - `GET /api/health`: detects locally available coding tools. Codex and Claude Code are currently supported.

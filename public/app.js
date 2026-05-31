@@ -5,6 +5,7 @@ import {
   normalizeOutputRequirement,
   outputRequirementGuidance
 } from "./outputRequirement.js";
+import { estimatePlanTokenUsage, formatCompactTokens, formatTokenEstimate } from "./tokenEstimator.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -2253,14 +2254,23 @@ function renderRunPreviewSummary() {
     writable: nodes.filter((node) => (node.sandbox || "workspace-write") === "workspace-write").length,
     synthesis: nodes.filter((node) => node.mode === "synthesis").length
   };
-  const estimatedTokens = estimatePlanTokens(state.plan);
+  const tokenEstimate = estimatePlanTokenUsage(state.plan, {
+    goal: $("goalInput")?.value || state.session?.goal || "",
+    runOptions: options
+  });
+  const tokenEstimateByNode = new Map((tokenEstimate.nodes || []).map((item) => [item.id, item]));
+  const tokenBreakdown = [
+    `提示词 ${formatCompactTokens(tokenEstimate.promptTokens)}`,
+    `输出 ${formatCompactTokens(tokenEstimate.outputTokens)}`,
+    `日志/开销 ${formatCompactTokens((tokenEstimate.logTokens || 0) + (tokenEstimate.overheadTokens || 0))}`
+  ].join(" · ");
   summary.innerHTML = `
     <div class="run-preview-card"><span>节点</span><strong>${counts.total}</strong></div>
     <div class="run-preview-card"><span>最大并发</span><strong>${options.maxConcurrency}</strong></div>
     <div class="run-preview-card"><span>人工确认</span><strong>${counts.human}</strong></div>
     <div class="run-preview-card"><span>自动评审</span><strong>${counts.autoReview}</strong></div>
     <div class="run-preview-card"><span>联网节点</span><strong>${options.networkPolicy === "full-access" ? "全部执行节点" : counts.network}</strong></div>
-    <div class="run-preview-card"><span>预计 token</span><strong>${estimatedTokens}</strong></div>
+    <div class="run-preview-card wide" title="${escapeAttr(tokenBreakdown)}"><span>预算 token</span><strong>${formatTokenEstimate(tokenEstimate)}</strong><em>${escapeHtml(tokenBreakdown)}</em></div>
   `;
   nodesBox.innerHTML = nodes.map((node) => `
     <article class="run-preview-node">
@@ -2271,15 +2281,11 @@ function renderRunPreviewSummary() {
       <div class="run-preview-badges">
         <span>${escapeHtml(node.sandbox || "workspace-write")}</span>
         <span>${escapeHtml(options.networkPolicy === "plan" ? (node.networkPolicy || "confirm") : options.networkPolicy)}</span>
+        <span>≈ ${escapeHtml(formatCompactTokens(tokenEstimateByNode.get(node.id)?.estimatedTokens || 0))}</span>
         ${node.mode === "synthesis" ? `<span>${escapeHtml(normalizeOutputRequirement(node.outputRequirement).type)}</span>` : ""}
       </div>
     </article>
   `).join("");
-}
-
-function estimatePlanTokens(plan) {
-  const text = JSON.stringify(plan || {});
-  return Math.max(1, Math.ceil(text.length / 4));
 }
 
 async function startRunConfirmed() {

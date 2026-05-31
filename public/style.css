@@ -1573,6 +1573,10 @@ a {
   background: #fbfcfc;
 }
 
+.run-preview-card.wide {
+  grid-column: span 2;
+}
+
 .run-preview-card span,
 .run-option-grid span {
   color: var(--muted);
@@ -1583,6 +1587,13 @@ a {
 .run-preview-card strong {
   color: var(--ink);
   font-size: 13px;
+}
+
+.run-preview-card em {
+  color: var(--muted);
+  font-size: 10px;
+  font-style: normal;
+  line-height: 1.3;
 }
 
 .run-option-grid {

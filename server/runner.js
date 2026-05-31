@@ -4,6 +4,7 @@ import path from "node:path";
 import { ROOT, RUNS_DIR, clampText, ensureDir, parseMaybeJson, safeId } from "./utils.js";
 import { defaultReviewPolicy, normalizeOutputRequirement, normalizePlan, normalizeReviewPolicy } from "./planner.js";
 import { defaultModelForProvider, normalizeToolProvider, providerLabel, runAgentExec } from "./codexRunner.js";
+import { estimateTokens } from "../public/tokenEstimator.js";
 
 export const DEFAULT_RUN_OPTIONS = {
   maxConcurrency: 2,
@@ -1149,14 +1150,6 @@ function estimateNodeUsage(output, prompt) {
     outputTokens,
     estimatedTokens: promptTokens + outputTokens
   };
-}
-
-function estimateTokens(text) {
-  const normalized = String(text || "").trim();
-  if (!normalized) return 0;
-  const cjk = (normalized.match(/[\u3400-\u9fff]/g) || []).length;
-  const latin = Math.max(0, normalized.length - cjk);
-  return Math.max(1, Math.ceil(cjk * 0.75 + latin / 4));
 }
 
 function clampInteger(value, fallback, min, max) {
