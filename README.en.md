@@ -28,6 +28,10 @@ USE_MOCK_CODEX=1 npm start
 npm test
 ```
 
+## License
+
+This project is licensed under the [Apache License 2.0](./LICENSE).
+
 ## Latest Updates - 2026-05-19
 
 - Conversation title and artifact note: each generated workflow derives a visible conversation name that users can edit at the top of the canvas. The artifact folder now includes `对话命名.md`, which records the current title, original goal, session path, and artifact path, and is updated after user renaming.
