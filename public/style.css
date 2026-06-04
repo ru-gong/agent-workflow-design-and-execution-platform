@@ -70,7 +70,7 @@ a {
   gap: 12px;
   padding: 7px 14px;
   border-bottom: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.94);
+  background: #edf3f1;
   backdrop-filter: blur(14px);
 }
 
