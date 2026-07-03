@@ -16,7 +16,9 @@ npm start
 
 Open <http://localhost:8787>.
 
-To try the UI and planning flow without spending real tool calls:
+By default, user goals call the selected real coding tool, Codex or Claude Code, to generate the workflow. If the model call fails, the page shows the error instead of silently falling back to a local test draft.
+
+To try the UI and planning flow without spending real tool calls, explicitly enable mock mode:
 
 ```bash
 USE_MOCK_CODEX=1 npm start

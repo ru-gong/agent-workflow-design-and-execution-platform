@@ -144,18 +144,27 @@ async function handleApi(req, res, url) {
       reasoningEffort,
       confirmed: Boolean(body.toolProvider)
     });
-    const result = await createPlan({
-      goal,
-      skills,
-      provider: toolProvider,
-      model: plannerModel,
-      reasoningEffort,
-      networkPolicy: ["confirm", "full-access"].includes(body.networkPolicy)
-        ? body.networkPolicy
-        : "confirm",
-      workspace: runtime.paths.workspaceRootPath,
-      planningDir: runtime.paths.planningDirPath
-    });
+    let result;
+    try {
+      result = await createPlan({
+        goal,
+        skills,
+        provider: toolProvider,
+        model: plannerModel,
+        reasoningEffort,
+        networkPolicy: ["confirm", "full-access"].includes(body.networkPolicy)
+          ? body.networkPolicy
+          : "confirm",
+        workspace: runtime.paths.workspaceRootPath,
+        planningDir: runtime.paths.planningDirPath
+      });
+    } catch (error) {
+      json(res, error.statusCode || 502, {
+        error: error.message || "大模型规划调用失败。",
+        details: normalizeError(error)
+      });
+      return;
+    }
     const session = await createSession({
       goal,
       plan: result.plan,

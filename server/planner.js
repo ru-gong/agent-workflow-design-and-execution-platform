@@ -100,7 +100,18 @@ export function normalizePlan(plan, goal = "") {
   return normalized;
 }
 
-export async function createPlan({ goal, skills, model, reasoningEffort = "medium", networkPolicy = "confirm", provider = "codex", workspace, planningDir }) {
+export async function createPlan({
+  goal,
+  skills,
+  model,
+  reasoningEffort = "medium",
+  networkPolicy = "confirm",
+  provider = "codex",
+  workspace,
+  planningDir,
+  agentPlanner = runAgentPlanner,
+  allowFallback = process.env.ALLOW_PLANNER_FALLBACK === "1"
+}) {
   const toolProvider = normalizeToolProvider(provider);
   const label = providerLabel(toolProvider);
   const plannerSkills = plannerAssignableSkills(skills);
@@ -110,16 +121,22 @@ export async function createPlan({ goal, skills, model, reasoningEffort = "mediu
   }
 
   try {
-    const result = await runAgentPlanner({ provider: toolProvider, goal, skills: plannerSkills, model, reasoningEffort, workspace, planningDir });
+    const result = await agentPlanner({ provider: toolProvider, goal, skills: plannerSkills, model, reasoningEffort, workspace, planningDir });
     const parsed = parseMaybeJson(result.finalMessage);
     const plan = finalizeGeneratedPlan(normalizePlan(parsed, goal), skills, reasoningEffort, networkPolicy);
     return { plan, source: toolProvider, raw: result.finalMessage };
   } catch (error) {
+    if (!allowFallback) {
+      const failure = new Error(`${label} planning failed: ${error.message}`);
+      failure.statusCode = error.statusCode || 502;
+      failure.result = error.result;
+      throw failure;
+    }
     const plan = finalizeGeneratedPlan(fallbackPlan(goal, plannerSkills, toolProvider), skills, reasoningEffort, networkPolicy);
     return {
       plan,
       source: "fallback",
-      warning: `${label} planning failed: ${error.message}`,
+      warning: `${label} planning failed; generated local fallback because ALLOW_PLANNER_FALLBACK=1: ${error.message}`,
       raw: error.result?.finalMessage || error.result?.stderr || ""
     };
   }

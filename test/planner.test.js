@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   applyNetworkPreference,
   applyReasoningPreference,
+  createPlan,
   fallbackPlan,
   filterPlannerAssignableSkills,
   filterUnavailableSkills,
@@ -65,6 +66,54 @@ test("fallbackPlan creates an executable editable DAG", () => {
   assert.equal(plan.nodes.at(-1).mode, "synthesis");
   assert.equal(plan.edges.length, plan.nodes.length - 1);
   assert.equal(plan.nodes.every((node) => Array.isArray(node.acceptance) && node.acceptance.length > 0), true);
+});
+
+test("createPlan requires real planner success by default", async () => {
+  const previousMock = process.env.USE_MOCK_CODEX;
+  const previousFallback = process.env.ALLOW_PLANNER_FALLBACK;
+  delete process.env.USE_MOCK_CODEX;
+  delete process.env.ALLOW_PLANNER_FALLBACK;
+  try {
+    await assert.rejects(
+      createPlan({
+        goal: "ship a feature",
+        skills: [],
+        agentPlanner: async () => {
+          throw new Error("auth failed");
+        }
+      }),
+      /Codex planning failed: auth failed/
+    );
+  } finally {
+    if (previousMock === undefined) delete process.env.USE_MOCK_CODEX;
+    else process.env.USE_MOCK_CODEX = previousMock;
+    if (previousFallback === undefined) delete process.env.ALLOW_PLANNER_FALLBACK;
+    else process.env.ALLOW_PLANNER_FALLBACK = previousFallback;
+  }
+});
+
+test("createPlan only generates local fallback when explicitly allowed", async () => {
+  const previousMock = process.env.USE_MOCK_CODEX;
+  const previousFallback = process.env.ALLOW_PLANNER_FALLBACK;
+  delete process.env.USE_MOCK_CODEX;
+  process.env.ALLOW_PLANNER_FALLBACK = "1";
+  try {
+    const result = await createPlan({
+      goal: "ship a feature",
+      skills: [],
+      agentPlanner: async () => {
+        throw new Error("temporary planner outage");
+      }
+    });
+    assert.equal(result.source, "fallback");
+    assert.match(result.warning, /ALLOW_PLANNER_FALLBACK=1/);
+    assert.equal(result.plan.nodes.at(-1).mode, "synthesis");
+  } finally {
+    if (previousMock === undefined) delete process.env.USE_MOCK_CODEX;
+    else process.env.USE_MOCK_CODEX = previousMock;
+    if (previousFallback === undefined) delete process.env.ALLOW_PLANNER_FALLBACK;
+    else process.env.ALLOW_PLANNER_FALLBACK = previousFallback;
+  }
 });
 
 test("normalizePlan keeps output requirements only for synthesis nodes", () => {
